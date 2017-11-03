@@ -1873,14 +1873,7 @@ child_sa_t * child_sa_create(host_t *me, host_t* other,
 		 * reqid to successfully "trigger" the SA on the kernel level. Rekeying
 		 * such an SA requires an explicit reqid, as the cache currently knows
 		 * the original selectors only for that reqid. */
-		if (rekey)
-		{
-			this->reqid = rekey;
-		}
-		else
-		{
-			this->reqid = charon->traps->find_reqid(charon->traps, config);
-		}
+		this->reqid = rekey;
 	}
 	else
 	{
