@@ -205,11 +205,6 @@ struct private_kernel_pfkey_ipsec_t
 	linked_list_t *policies;
 
 	/**
-	 * List of exclude routes (exclude_route_t)
-	 */
-	linked_list_t *excludes;
-
-	/**
 	 * Hash table of IPsec SAs using policies (ipsec_sa_t)
 	 */
 	hashtable_t *sas;

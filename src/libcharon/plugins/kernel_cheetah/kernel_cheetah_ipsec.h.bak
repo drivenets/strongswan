@@ -1,0 +1,18 @@
+#ifndef KERNEL_CHEETAH_IPSEC_H_
+#define KERNEL_CHEETAH_IPSEC_H_
+
+#include <kernel/kernel_ipsec.h>
+
+typedef struct kernel_cheetah_ipsec_t kernel_cheetah_ipsec_t;
+
+struct kernel_cheetah_ipsec_t {
+
+	/**
+	 * Implements kernel_ipsec_t interface
+	 */
+	kernel_ipsec_t interface;
+};
+
+kernel_cheetah_ipsec_t *kernel_cheetah_ipsec_create();
+
+#endif /** KERNEL_CHEETAH_IPSEC_H_ @}*/

@@ -552,6 +552,15 @@ if MONOLITHIC
 endif
 endif
 
+#@@@ hagai start
+if USE_KERNEL_CHEETAH
+  SUBDIRS += plugins/kernel_cheetah
+if MONOLITHIC
+  libcharon_la_LIBADD += plugins/kernel_cheetah/libstrongswan-kernel-cheetah.la
+endif
+endif
+#@@@ hagai end
+
 if USE_KERNEL_PFKEY
   SUBDIRS += plugins/kernel_pfkey
 if MONOLITHIC

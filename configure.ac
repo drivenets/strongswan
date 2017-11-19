@@ -1,4 +1,4 @@
-#
+\#
 # Copyright (C) 2007-2017 Tobias Brunner
 # Copyright (C) 2006-2017 Andreas Steffen
 # Copyright (C) 2006-2014 Martin Willi
@@ -214,6 +214,9 @@ ARG_ENABL_SET([xauth-noauth],   [enable XAuth pseudo-backend that does not actua
 # kernel interfaces / sockets
 ARG_DISBL_SET([kernel-netlink], [disable the netlink kernel interface.])
 ARG_ENABL_SET([kernel-pfkey],   [enable the PF_KEY kernel interface.])
+#@@@ hagai start
+ARG_ENABL_SET([kernel-cheetah], [enable cheetah as IPSec backend.])
+#@@@ hagai end
 ARG_ENABL_SET([kernel-pfroute], [enable the PF_ROUTE kernel interface.])
 ARG_ENABL_SET([kernel-iph],     [enable the Windows IP Helper based networking backend.])
 ARG_ENABL_SET([kernel-libipsec],[enable the libipsec kernel interface.])
@@ -1435,6 +1438,9 @@ ADD_PLUGIN([kernel-libipsec],      [c charon cmd])
 ADD_PLUGIN([kernel-wfp],           [c charon])
 ADD_PLUGIN([kernel-iph],           [c charon])
 ADD_PLUGIN([kernel-pfkey],         [c charon starter nm cmd])
+#@@@ hagai start
+ADD_PLUGIN([kernel-cheetah],       [c charon starter nm cmd])
+#@@@ hagai end
 ADD_PLUGIN([kernel-pfroute],       [c charon starter nm cmd])
 ADD_PLUGIN([kernel-netlink],       [c charon starter nm cmd])
 ADD_PLUGIN([resolve],              [c charon cmd])
@@ -1608,6 +1614,9 @@ AM_CONDITIONAL(USE_LOAD_TESTER, test x$load_tester = xtrue)
 AM_CONDITIONAL(USE_HA, test x$ha = xtrue)
 AM_CONDITIONAL(USE_KERNEL_NETLINK, test x$kernel_netlink = xtrue)
 AM_CONDITIONAL(USE_KERNEL_PFKEY, test x$kernel_pfkey = xtrue)
+#@@@ hagai start
+AM_CONDITIONAL(USE_KERNEL_CHEETAH, test x$kernel_cheetah = xtrue)
+#@@@ hagai end
 AM_CONDITIONAL(USE_KERNEL_PFROUTE, test x$kernel_pfroute = xtrue)
 AM_CONDITIONAL(USE_KERNEL_LIBIPSEC, test x$kernel_libipsec = xtrue)
 AM_CONDITIONAL(USE_KERNEL_WFP, test x$kernel_wfp = xtrue)
@@ -1951,6 +1960,7 @@ AC_CONFIG_FILES([
 	src/libcharon/plugins/ha/Makefile
 	src/libcharon/plugins/kernel_netlink/Makefile
 	src/libcharon/plugins/kernel_pfkey/Makefile
+	src/libcharon/plugins/kernel_cheetah/Makefile
 	src/libcharon/plugins/kernel_pfroute/Makefile
 	src/libcharon/plugins/kernel_libipsec/Makefile
 	src/libcharon/plugins/kernel_wfp/Makefile

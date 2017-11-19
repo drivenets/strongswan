@@ -1,0 +1,529 @@
+
+#include "kernel_cheetah_ipsec.h"
+#include <collections/hashtable.h>
+#include "qpb.pb-c.h"
+#include "ipsec.pb-c.h"
+#include "nano_server.h"
+
+/** Base priority for installed policies */
+#define PRIO_BASE 200000
+
+
+typedef struct private_kernel_cheetah_ipsec_t private_kernel_cheetah_ipsec_t;
+
+/**
+ * Private variables and functions of kernel_cheetah class.
+ */
+struct private_kernel_cheetah_ipsec_t
+{
+	/**
+	 * Public part of the kernel_pfkey_t object.
+	 */
+	kernel_cheetah_ipsec_t public;
+
+	/**
+	 * Hash table of IPsec SAs using policies (ipsec_sa_t)
+	 */
+	hashtable_t *sas;
+
+	/**
+	 * whether to install routes along policies
+	 */
+	bool install_routes;
+
+	struct nm_transport_socket* nm_socket;
+};
+
+
+typedef struct route_entry_t route_entry_t;
+
+/**
+ * installed routing entry
+ */
+struct route_entry_t {
+	/** name of the interface the route is bound to */
+	char *if_name;
+
+	/** source ip of the route */
+	host_t *src_ip;
+
+	/** gateway for this route */
+	host_t *gateway;
+
+	/** destination net */
+	chunk_t dst_net;
+
+	/** destination net prefixlen */
+	uint8_t prefixlen;
+};
+
+/**
+ * destroy an route_entry_t object
+ */
+static void route_entry_destroy(route_entry_t *this)
+{
+	free(this->if_name);
+	DESTROY_IF(this->src_ip);
+	DESTROY_IF(this->gateway);
+	chunk_free(&this->dst_net);
+	free(this);
+}
+
+/**
+ * compare two route_entry_t objects
+ */
+static bool route_entry_equals(route_entry_t *a, route_entry_t *b)
+{
+	return a->if_name && b->if_name && streq(a->if_name, b->if_name) &&
+		   a->src_ip->ip_equals(a->src_ip, b->src_ip) &&
+		   a->gateway && b->gateway &&
+		   a->gateway->ip_equals(a->gateway, b->gateway) &&
+		   chunk_equals(a->dst_net, b->dst_net) && a->prefixlen == b->prefixlen;
+}
+
+typedef struct ipsec_sa_t ipsec_sa_t;
+
+/**
+ * IPsec SA assigned to a policy.
+ */
+struct ipsec_sa_t {
+	/** Source address of this SA */
+	host_t *src;
+
+	/** Destination address of this SA */
+	host_t *dst;
+
+	/** Description of this SA */
+	ipsec_sa_cfg_t cfg;
+
+	/** Reference count for this SA */
+	refcount_t refcount;
+};
+
+/**
+ * Hash function for ipsec_sa_t objects
+ */
+static u_int ipsec_sa_hash(ipsec_sa_t *sa)
+{
+	return chunk_hash_inc(sa->src->get_address(sa->src),
+						  chunk_hash_inc(sa->dst->get_address(sa->dst),
+						  chunk_hash(chunk_from_thing(sa->cfg))));
+}
+
+/**
+ * Equality function for ipsec_sa_t objects
+ */
+static bool ipsec_sa_equals(ipsec_sa_t *sa, ipsec_sa_t *other_sa)
+{
+	return sa->src->ip_equals(sa->src, other_sa->src) &&
+		   sa->dst->ip_equals(sa->dst, other_sa->dst) &&
+		   ipsec_sa_cfg_equals(&sa->cfg, &other_sa->cfg);
+}
+
+/**
+ * Allocate or reference an IPsec SA object
+ */
+static ipsec_sa_t *ipsec_sa_create(private_kernel_cheetah_ipsec_t *this,
+								   host_t *src, host_t *dst,
+								   ipsec_sa_cfg_t *cfg)
+{
+	ipsec_sa_t *sa, *found;
+	INIT(sa,
+		.src = src,
+		.dst = dst,
+		.cfg = *cfg,
+	);
+	found = this->sas->get(this->sas, sa);
+	if (!found)
+	{
+		sa->src = src->clone(src);
+		sa->dst = dst->clone(dst);
+		this->sas->put(this->sas, sa, sa);
+	}
+	else
+	{
+		free(sa);
+		sa = found;
+	}
+	ref_get(&sa->refcount);
+	return sa;
+}
+
+/**
+ * Release and destroy an IPsec SA object
+ */
+static void ipsec_sa_destroy(private_kernel_cheetah_ipsec_t *this,
+							 ipsec_sa_t *sa)
+{
+	if (ref_put(&sa->refcount))
+	{
+		this->sas->remove(this->sas, sa);
+		DESTROY_IF(sa->src);
+		DESTROY_IF(sa->dst);
+		free(sa);
+	}
+}
+
+typedef struct policy_sa_t policy_sa_t;
+typedef struct policy_sa_out_t policy_sa_out_t;
+
+/**
+ * Mapping between a policy and an IPsec SA.
+ */
+struct policy_sa_t {
+	/** Priority assigned to the policy when installed with this SA */
+	uint32_t priority;
+
+	/** Base priority assigned to the policy when installed with this SA */
+	uint32_t auto_priority;
+
+	/** Type of the policy */
+	policy_type_t type;
+
+	/** Assigned SA */
+	ipsec_sa_t *sa;
+};
+
+/**
+ * For outbound policies we also cache the traffic selectors in order to install
+ * the route.
+ */
+struct policy_sa_out_t {
+	/** Generic interface */
+	policy_sa_t generic;
+
+	/** Source traffic selector of this policy */
+	traffic_selector_t *src_ts;
+
+	/** Destination traffic selector of this policy */
+	traffic_selector_t *dst_ts;
+};
+
+/**
+ * Create a policy_sa(_in)_t object
+ */
+static policy_sa_t *policy_sa_create(private_kernel_cheetah_ipsec_t *this,
+	policy_dir_t dir, policy_type_t type, host_t *src, host_t *dst,
+	traffic_selector_t *src_ts, traffic_selector_t *dst_ts, ipsec_sa_cfg_t *cfg)
+{
+	policy_sa_t *policy;
+
+	if (dir == POLICY_OUT)
+	{
+		policy_sa_out_t *out;
+		INIT(out,
+			.src_ts = src_ts->clone(src_ts),
+			.dst_ts = dst_ts->clone(dst_ts),
+		);
+		policy = &out->generic;
+	}
+	else
+	{
+		INIT(policy, .priority = 0);
+	}
+	policy->type = type;
+	policy->sa = ipsec_sa_create(this, src, dst, cfg);
+	return policy;
+}
+
+/**
+ * Destroy a policy_sa(_in)_t object
+ */
+static void policy_sa_destroy(policy_sa_t *policy, policy_dir_t dir,
+							  private_kernel_cheetah_ipsec_t *this)
+{
+	if (dir == POLICY_OUT)
+	{
+		policy_sa_out_t *out = (policy_sa_out_t*)policy;
+		out->src_ts->destroy(out->src_ts);
+		out->dst_ts->destroy(out->dst_ts);
+	}
+	ipsec_sa_destroy(this, policy->sa);
+	free(policy);
+}
+
+CALLBACK(policy_sa_destroy_cb, void,
+	policy_sa_t *policy, va_list args)
+{
+	private_kernel_cheetah_ipsec_t *this;
+	policy_dir_t dir;
+
+	VA_ARGS_VGET(args, dir, this);
+	policy_sa_destroy(policy, dir, this);
+}
+
+typedef struct policy_entry_t policy_entry_t;
+
+/**
+ * installed kernel policy.
+ */
+struct policy_entry_t {
+	/** Index assigned by the kernel */
+	uint32_t index;
+
+	/** Direction of this policy: in, out, forward */
+	uint8_t direction;
+
+	/** Parameters of installed policy */
+	struct {
+		/** Subnet and port */
+		host_t *net;
+		/** Subnet mask */
+		uint8_t mask;
+		/** Protocol */
+		uint8_t proto;
+	} src, dst;
+
+	/** Associated route installed for this policy */
+	route_entry_t *route;
+
+	/** List of SAs this policy is used by, ordered by priority */
+	linked_list_t *used_by;
+};
+
+static void ts2subnet(traffic_selector_t* ts, Qpb__L3Prefix *subnet)
+{
+	host_t *net_host;
+	chunk_t net_chunk;
+	uint8_t mask;
+
+	ts->to_subnet(ts, &net_host, &mask);
+	subnet->length = mask;
+	net_chunk = net_host->get_address(net_host);
+	subnet->bytes.len = net_chunk.len;
+	memcpy(subnet->bytes.data, net_chunk.ptr, net_chunk.len);
+	net_host->destroy(net_host);
+}
+
+METHOD(kernel_ipsec_t, get_spi, status_t,
+	private_kernel_cheetah_ipsec_t *this, host_t *src, host_t *dst,
+	uint8_t protocol, uint32_t *spi)
+{
+	return SUCCESS;
+}
+
+METHOD(kernel_ipsec_t, get_cpi, status_t,
+	private_kernel_cheetah_ipsec_t *this, host_t *src, host_t *dst,
+	uint16_t *cpi)
+{
+	return SUCCESS;
+}
+
+METHOD(kernel_ipsec_t, add_sa, status_t,
+	private_kernel_cheetah_ipsec_t *this, kernel_ipsec_sa_id_t *id,
+	kernel_ipsec_add_sa_t *data)
+{
+	ipsec_mode_t mode = data->mode;
+
+	if (data->update)
+	{
+		/* As we didn't know the reqid during SPI allocation, we used reqid
+		 * zero. Unfortunately we can't SADB_UPDATE to the new reqid, hence we
+		 * have to delete the SPI allocation state manually. The reqid
+		 * selector does not count for that, therefore we have to delete
+		 * that state before installing the new SA to avoid deleting the
+		 * the new state after installing it. */
+		kernel_ipsec_sa_id_t del_id = {
+			.src = id->src,
+			.dst = id->dst,
+			.spi = id->spi,
+			.proto = id->proto,
+		};
+		kernel_ipsec_del_sa_t del = { 0 };
+
+		if (this->public.interface.del_sa(&this->public.interface, &del_id,
+										  &del) != SUCCESS)
+		{
+			DBG1(DBG_KNL, "deleting SPI allocation SA failed");
+		}
+	}
+
+	DBG2(DBG_KNL, "adding SAD entry with SPI %.8x and reqid {%u}",
+		 ntohl(id->spi), data->reqid);
+
+	Ipsec__AddSA proto = IPSEC__ADD_SA__INIT;
+	Qpb__L3Address left = QPB__L3_ADDRESS__INIT;
+	Qpb__L3Prefix left_subnet = QPB__L3_PREFIX__INIT;
+	Qpb__L3Address right = QPB__L3_ADDRESS__INIT;
+	Qpb__L3Prefix right_subnet = QPB__L3_PREFIX__INIT;
+
+	struct sockaddr_in* left_addr = (struct sockaddr_in*)(id->src->get_sockaddr(id->src));
+	proto.left = &left;
+	proto.left->v4->value = left_addr->sin_addr.s_addr;
+
+	struct sockaddr_in* right_addr = (struct sockaddr_in*)(id->dst->get_sockaddr(id->dst));
+	proto.right = &right;
+	proto.right->v4->value = right_addr->sin_addr.s_addr;
+
+	traffic_selector_t *first_src_ts, *first_dst_ts;
+	data->src_ts->get_first(data->src_ts, (void**)&first_src_ts);
+	data->dst_ts->get_first(data->dst_ts, (void**)&first_dst_ts);
+
+	proto.left_subnet = &left_subnet;
+	ts2subnet(first_src_ts, proto.left_subnet);
+
+	proto.right_subnet = &right_subnet;
+	ts2subnet(first_dst_ts, proto.right_subnet);
+
+	void						*buf;
+	unsigned					buf_len;
+	int							res;
+
+	buf_len = ipsec__add_sa__get_packed_size(&proto);
+	buf = malloc(buf_len);
+	ipsec__add_sa__pack(&proto, buf);
+	res = nm_transport_send_data(this->nm_socket, buf, buf_len);
+	free(buf);
+
+	return SUCCESS;
+
+}
+
+METHOD(kernel_ipsec_t, update_sa, status_t,
+	private_kernel_cheetah_ipsec_t *this, kernel_ipsec_sa_id_t *id,
+	kernel_ipsec_update_sa_t *data)
+{
+	return SUCCESS;
+}
+
+METHOD(kernel_ipsec_t, query_sa, status_t,
+	private_kernel_cheetah_ipsec_t *this, kernel_ipsec_sa_id_t *id,
+	kernel_ipsec_query_sa_t *data, uint64_t *bytes, uint64_t *packets,
+	time_t *time)
+{
+	return SUCCESS;
+}
+
+METHOD(kernel_ipsec_t, del_sa, status_t,
+	private_kernel_cheetah_ipsec_t *this, kernel_ipsec_sa_id_t *id,
+	kernel_ipsec_del_sa_t *data)
+{
+	return SUCCESS;
+}
+
+METHOD(kernel_ipsec_t, flush_sas, status_t,
+	private_kernel_cheetah_ipsec_t *this)
+{
+	return SUCCESS;
+}
+
+METHOD(kernel_ipsec_t, add_policy, status_t,
+	private_kernel_cheetah_ipsec_t *this, kernel_ipsec_policy_id_t *id,
+	kernel_ipsec_manage_policy_t *data)
+{
+	return SUCCESS;
+}
+
+METHOD(kernel_ipsec_t, query_policy, status_t,
+	private_kernel_cheetah_ipsec_t *this, kernel_ipsec_policy_id_t *id,
+	kernel_ipsec_query_policy_t *data, time_t *use_time)
+{
+	return SUCCESS;
+}
+
+METHOD(kernel_ipsec_t, del_policy, status_t,
+	private_kernel_cheetah_ipsec_t *this, kernel_ipsec_policy_id_t *id,
+	kernel_ipsec_manage_policy_t *data)
+{
+	return SUCCESS;
+}
+
+METHOD(kernel_ipsec_t, flush_policies, status_t,
+	private_kernel_cheetah_ipsec_t *this)
+{
+	return SUCCESS;
+}
+
+
+METHOD(kernel_ipsec_t, bypass_socket, bool,
+	private_kernel_cheetah_ipsec_t *this, int fd, int family)
+{
+	return TRUE;
+}
+
+METHOD(kernel_ipsec_t, enable_udp_decap, bool,
+	private_kernel_cheetah_ipsec_t *this, int fd, int family, uint16_t port)
+{
+	return TRUE;
+}
+
+METHOD(kernel_ipsec_t, destroy, void,
+	private_kernel_cheetah_ipsec_t *this)
+{
+	if (this->nm_socket > 0)
+	{
+		nm_transport_close(this->nm_socket);
+	}
+	this->sas->destroy(this->sas);
+	free(this);
+}
+
+static void channel_established_cb(void *context)
+{
+	printf("channel_established_cb\n");
+}
+
+static void channel_disconnected_cb(void *context)
+{
+	printf("channel_disconnected_cb\n");
+}
+
+static void msg_received_cb(uint8_t *msg, int len, void *args)
+{
+	printf("msg_received_cb: message length %d\n", len);
+}
+
+
+/*
+ * Described in header.
+ */
+kernel_cheetah_ipsec_t *kernel_cheetah_ipsec_create()
+{
+	private_kernel_cheetah_ipsec_t *this;
+
+	INIT(this,
+		.public = {
+			.interface = {
+				.get_spi = _get_spi,
+				.get_cpi = _get_cpi,
+				.add_sa  = _add_sa,
+				.update_sa = _update_sa,
+				.query_sa = _query_sa,
+				.del_sa = _del_sa,
+				.flush_sas = _flush_sas,
+				.add_policy = _add_policy,
+				.query_policy = _query_policy,
+				.del_policy = _del_policy,
+				.flush_policies = _flush_policies,
+				.bypass_socket = _bypass_socket,
+				.enable_udp_decap = _enable_udp_decap,
+				.destroy = _destroy,
+			},
+		},
+		.sas = hashtable_create((hashtable_hash_t)ipsec_sa_hash,
+								(hashtable_equals_t)ipsec_sa_equals, 32),
+		.install_routes = lib->settings->get_bool(lib->settings,
+												  "%s.install_routes", TRUE,
+												  lib->ns),
+	);
+
+	struct nm_transport_socket* ret = nm_transport_init(&this->nm_socket,
+			//,"tcp://0.0.0.0:7788"
+			"tcp://0.0.0.0:2710", //@@@ todo hagai hardcoded first, then from config
+			"strongswan",
+			0,
+			msg_received_cb,
+			channel_established_cb,
+			channel_disconnected_cb,
+			NULL,
+			this);
+
+	if (ret <= 0)
+	{
+		DBG1(DBG_KNL, "unable to create nanoserver socket");
+		destroy(this);
+		return NULL;
+	}
+
+	return &this->public;
+}
