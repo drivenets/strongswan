@@ -42,12 +42,14 @@
 #include <utils/debug.h>
 #include <threading/mutex.h>
 #include <threading/condvar.h>
+#include <threading/thread.h>
 #include <collections/array.h>
 #include <collections/hashtable.h>
 #include <collections/linked_list.h>
 
 #include "qpb.pb-c.h"
 #include "ipsec.pb-c.h"
+#include "nanoserver.pb-c.h"
 #include "nano_server.h"
 
 /** Required for Linux 2.6.26 kernel and later */
@@ -344,7 +346,10 @@ struct private_kernel_netlink_ipsec_t {
 	array_t *bypass;
 
 	//@@@ hagai start
-	struct nm_transport_socket nm_socket;
+	struct nm_transport_socket* nm_socket;
+	thread_t* nm_thread;
+	mutex_t*  nm_mutex;
+	condvar_t* nm_condvar;
 	//@@@ hagai end
 
 	/**
@@ -1320,6 +1325,10 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 {
 	netlink_buf_t request;
 	const char *alg_name;
+	//@@@ hagai start
+	const char* enc_alg_name;
+	const char* auth_alg_name;
+	//@@@ hagai end
 	char markstr[32] = "";
 	struct nlmsghdr *hdr;
 	struct xfrm_usersa_info *sa;
@@ -1462,6 +1471,9 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 				 encryption_algorithm_names, data->enc_alg,
 				 data->enc_key.len * 8);
 
+			//@@@ hagai start
+			enc_alg_name = alg_name;
+			//@@@ hagai end
 			algo = netlink_reserve(hdr, sizeof(request), XFRMA_ALG_AEAD,
 								   sizeof(*algo) + data->enc_key.len);
 			if (!algo)
@@ -1490,6 +1502,10 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 				 encryption_algorithm_names, data->enc_alg,
 				 data->enc_key.len * 8);
 
+			//@@@ hagai start
+			enc_alg_name = alg_name;
+			//@@@ hagai end
+
 			algo = netlink_reserve(hdr, sizeof(request), XFRMA_ALG_CRYPT,
 								   sizeof(*algo) + data->enc_key.len);
 			if (!algo)
@@ -1516,6 +1532,10 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 		}
 		DBG2(DBG_KNL, "  using integrity algorithm %N with key size %d",
 			 integrity_algorithm_names, data->int_alg, data->int_key.len * 8);
+
+		//@@@ hagai start
+		auth_alg_name = alg_name;
+		//@@@ hagai end
 
 		switch (data->int_alg)
 		{
@@ -1718,55 +1738,67 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 	}
 
 	//@@@ hagai start
-	Ipsec__AddSA proto = IPSEC__ADD_SA__INIT;
-	Qpb__L3Address left = QPB__L3_ADDRESS__INIT;
-	Qpb__Ipv4Address left_addr = QPB__IPV4_ADDRESS__INIT;
-	Qpb__L3Prefix left_subnet = QPB__L3_PREFIX__INIT;
+	Cheetah__CheetahMessage encap = CHEETAH__CHEETAH_MESSAGE__INIT;
+	Ipsec__Message ipsec_msg = IPSEC__MESSAGE__INIT;
 
-	Qpb__L3Address right = QPB__L3_ADDRESS__INIT;
-	Qpb__Ipv4Address right_addr = QPB__IPV4_ADDRESS__INIT;
-	Qpb__L3Prefix right_subnet = QPB__L3_PREFIX__INIT;
+	encap.ipsec = &ipsec_msg;
+	encap.message_case = CHEETAH__CHEETAH_MESSAGE__MESSAGE_IPSEC;
+	ipsec_msg.type = IPSEC__MESSAGE__TYPE__ADD_SA;
 
-	proto.spi = ntohl(id->spi);
-	struct sockaddr_in* left_sockaddr = (struct sockaddr_in*)(id->src->get_sockaddr(id->src));
-	proto.left = &left;
-	proto.left->v4 = &left_addr;
-	proto.left->v4->value = left_sockaddr->sin_addr.s_addr;
+	Ipsec__AddSA ipsec_add_sa_msg = IPSEC__ADD_SA__INIT;
+	Qpb__L3Address src = QPB__L3_ADDRESS__INIT;
+	Qpb__Ipv4Address src_addr = QPB__IPV4_ADDRESS__INIT;
+	Qpb__L3Prefix src_subnet = QPB__L3_PREFIX__INIT;
 
-	struct sockaddr_in* right_sockaddr = (struct sockaddr_in*)(id->dst->get_sockaddr(id->dst));
-	proto.right = &right;
-	proto.right->v4 = &right_addr;
-	proto.right->v4->value = right_sockaddr->sin_addr.s_addr;
+	Qpb__L3Address dst = QPB__L3_ADDRESS__INIT;
+	Qpb__Ipv4Address dst_addr = QPB__IPV4_ADDRESS__INIT;
+	Qpb__L3Prefix dst_subnet = QPB__L3_PREFIX__INIT;
+
+	ipsec_msg.add_sa = &ipsec_add_sa_msg;
+
+	ipsec_add_sa_msg.spi = ntohl(id->spi);
+	struct sockaddr_in* src_sockaddr = (struct sockaddr_in*)(id->src->get_sockaddr(id->src));
+	ipsec_add_sa_msg.src = &src;
+	ipsec_add_sa_msg.src->v4 = &src_addr;
+	ipsec_add_sa_msg.src->v4->value = src_sockaddr->sin_addr.s_addr;
+
+	struct sockaddr_in* dst_sockaddr = (struct sockaddr_in*)(id->dst->get_sockaddr(id->dst));
+	ipsec_add_sa_msg.dst = &dst;
+	ipsec_add_sa_msg.dst->v4 = &dst_addr;
+	ipsec_add_sa_msg.dst->v4->value = dst_sockaddr->sin_addr.s_addr;
 
 	data->src_ts->get_first(data->src_ts, (void**)&first_src_ts);
 	data->dst_ts->get_first(data->dst_ts, (void**)&first_dst_ts);
 
-	proto.left_subnet = &left_subnet;
-	ts2_l3prefix(first_src_ts, proto.left_subnet);
+	ipsec_add_sa_msg.src_subnet = &src_subnet;
+	ts2_l3prefix(first_src_ts, ipsec_add_sa_msg.src_subnet);
 
-	proto.right_subnet = &right_subnet;
-	ts2_l3prefix(first_dst_ts, proto.right_subnet);
+	ipsec_add_sa_msg.dst_subnet = &dst_subnet;
+	ts2_l3prefix(first_dst_ts, ipsec_add_sa_msg.dst_subnet);
 
-	proto.inbound = data->inbound;
+	ipsec_add_sa_msg.inbound = data->inbound;
 
-	proto.enc_alg_name = strdup(alg_name);
-	proto.enc_key.len = data->enc_key.len;
-	proto.enc_key.data = (uint8_t *)malloc(proto.enc_key.len);
-	memcpy(proto.enc_key.data, data->enc_key.ptr, data->enc_key.len);
+	ipsec_add_sa_msg.enc_alg_name = strdup(enc_alg_name);
+	ipsec_add_sa_msg.enc_key.len = data->enc_key.len;
+	ipsec_add_sa_msg.enc_key.data = (uint8_t *)malloc(ipsec_add_sa_msg.enc_key.len);
+	memcpy(ipsec_add_sa_msg.enc_key.data, data->enc_key.ptr, data->enc_key.len);
 
-	proto.auth_alg_name = strdup(int_na)
-	proto.auth_key.len = data->int_key.len;
-	proto.auth_key.data = (uint8_t *)malloc(proto.auth_key.len);
-	memcpy(proto.auth_key.data, data->auth_key.ptr, proto.auth_key.len);
+	ipsec_add_sa_msg.auth_alg_name = strdup(auth_alg_name);
+	ipsec_add_sa_msg.auth_key.len = data->int_key.len;
+	ipsec_add_sa_msg.auth_key.data = (uint8_t *)malloc(ipsec_add_sa_msg.auth_key.len);
+	memcpy(ipsec_add_sa_msg.auth_key.data, data->int_key.ptr, ipsec_add_sa_msg.auth_key.len);
 
 	void						*buf;
 	unsigned					buf_len;
 	int							res;
 
-	buf_len = ipsec__add_sa__get_packed_size(&proto);
+	buf_len = cheetah__cheetah_message__get_packed_size(&encap);
 	buf = malloc(buf_len);
-	ipsec__add_sa__pack(&proto, buf);
-	res = nm_transport_send_data(&this->nm_socket, buf, buf_len);
+	cheetah__cheetah_message__pack(&encap, buf);
+
+	DBG1(DBG_KNL, "sending add_sa to cheetah. socket=%x, session=%lu, buf_len=%d", this->nm_socket, this->nm_socket->session_id, buf_len);
+	res = nm_transport_send_data(this->nm_socket, buf, buf_len);
+	DBG1(DBG_KNL, "sa_send result=%d, errno=%d", res, errno);
 	free(buf);
 
 	//@@@ hagai end
@@ -3212,6 +3244,14 @@ METHOD(kernel_ipsec_t, destroy, void,
 	this->sas->destroy(this->sas);
 	this->condvar->destroy(this->condvar);
 	this->mutex->destroy(this->mutex);
+
+	//@@@ hagai start
+	nm_transport_stop_server(this->nm_socket);
+	this->nm_condvar->destroy(this->nm_condvar);
+	this->nm_mutex->destroy(this->nm_mutex);
+	free(this->nm_socket);
+	//@@@ hagai TODO - how to stop thread?
+	//@@@ hagai end
 	free(this);
 }
 
@@ -3322,18 +3362,53 @@ static void setup_spd_hash_thresh(private_kernel_netlink_ipsec_t *this,
 //@@@ hagai start
 static void channel_established_cb(void *context)
 {
-	printf("channel_established_cb\n");
+	private_kernel_netlink_ipsec_t* this =
+			(private_kernel_netlink_ipsec_t *)context;
+	this->nm_condvar->signal(this->nm_condvar);
+	DBG1(DBG_KNL, "channel established with cheetah\n");
 }
 
 static void channel_disconnected_cb(void *context)
 {
-	printf("channel_disconnected_cb\n");
+	DBG1(DBG_KNL, "channel disconnected with cheetah\n");
 }
 
 static void msg_received_cb(uint8_t *msg, int len, void *args)
 {
 	printf("msg_received_cb: message length %d\n", len);
 }
+
+static void nano_log(int i_LogLevel, char* pba_format, ...)
+{
+	if (NULL == pba_format)
+	{
+		/*
+		 * The meaning of pc_log points to NULL is usage of Log function without initializing the log previously
+		 * (by calling log_create function).
+		 */
+		return;
+	}
+
+    va_list args;
+    va_start(args, pba_format);
+	charon->bus->vlog(charon->bus, DBG_KNL, 1, pba_format, args);
+    va_end (args);
+}
+
+static void *nano_processing_thread(void *arg)
+{
+	private_kernel_netlink_ipsec_t *this = (private_kernel_netlink_ipsec_t *)arg;
+
+	thread_cancelability(TRUE); //@@@ hagai what is this?
+
+	while (TRUE)
+	{
+		nm_transport_client_loop(this->nm_socket, NULL);
+		usleep(100000); //@@@ hagai - tune this
+	}
+
+}
+
 //@@@ hagai end
 /*
  * Described in header.
@@ -3427,8 +3502,12 @@ kernel_netlink_ipsec_t *kernel_netlink_ipsec_create()
 						  (watcher_cb_t)receive_events, this);
 	}
 
+	//@@@ hagai teardown?
 	//@@@ hagai start
-	struct nm_transport_socket* ret = nm_transport_init(&this->nm_socket,
+	nm_transport_init_logger((logger_callback)nano_log);
+	this->nm_socket = (struct nm_transport_socket *)malloc(sizeof(struct nm_transport_socket));
+
+	this->nm_socket = nm_transport_init(this->nm_socket,
 			//,"tcp://0.0.0.0:7788"
 			"tcp://0.0.0.0:2710", //@@@ todo hagai hardcoded first, then from config
 			"strongswan",
@@ -3439,12 +3518,25 @@ kernel_netlink_ipsec_t *kernel_netlink_ipsec_create()
 			NULL,
 			this);
 
-	if (ret <= 0)
+	if (this->nm_socket <= 0)
 	{
 		DBG1(DBG_KNL, "unable to create nanoserver socket");
 		destroy(this);
 		return NULL;
 	}
+
+	this->nm_mutex = mutex_create(MUTEX_TYPE_DEFAULT);
+	this->nm_condvar = condvar_create(CONDVAR_TYPE_DEFAULT);
+
+	// start nano processing thread
+	this->nm_thread = thread_create(nano_processing_thread, this);
+
+	DBG1(DBG_KNL, "Waiting for a connection to cheetah");
+
+	// wait for the channel with cheetah to be established
+	this->nm_condvar->wait(this->nm_condvar, this->nm_mutex);
+
+	DBG1(DBG_KNL, "Connection with cheetah established");
 
 	//@@@ hagai end
 	return &this->public;

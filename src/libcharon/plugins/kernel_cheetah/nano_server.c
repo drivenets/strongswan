@@ -62,6 +62,8 @@ void nm_transport_change_channel_state(
 	}
 
 	prev_state = nm_sock->session_state;
+	nn_log(LOG_DEBUG, "nanoserver change state %d->%d", prev_state, new_channel_state);
+
 	nm_sock->session_state = new_channel_state;
 
 	if (prev_state != new_channel_state
@@ -198,7 +200,8 @@ static int send_msg(
 	}
 
 	nano_msg_encapsulation__pack(msg_encap, buf);
-	res = nn_send(socket->socket_id, buf, buf_len, NN_DONTWAIT);
+	//@@@ hagai should this be blocking? res = nn_send(socket->socket_id, buf, buf_len, NN_DONTWAIT);
+	res = nn_send(socket->socket_id, buf, buf_len, 0);
 	if (res < 0) {
 		if (EAGAIN == errno){
 			return NANO_MSG_SEND_AGAIN;

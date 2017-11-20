@@ -20,7 +20,9 @@ libstrongswan_kernel_cheetah_la_SOURCES = \
 	nano_server.h nano_server.c \
 	qpb.pb-c.h qpb.pb-c.c \
 	ipsec.pb-c.h ipsec.pb-c.c \
-	nanomsg_transport.pb-c.h nanomsg_transport.pb-c.c
-	
+	nanomsg_transport.pb-c.h nanomsg_transport.pb-c.c \
+	neighbor_provision.pb-c.h neighbor_provision.pb-c.c \
+	fpm.pb-c.h fpm.pb-c.c \
+	nanoserver.pb-c.h nanoserver.pb-c.c 
 
 libstrongswan_kernel_cheetah_la_LDFLAGS = -module -avoid-version -lnanomsg -lprotobuf-c
