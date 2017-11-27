@@ -1,1 +1,1 @@
-../../../../../../../src/jag_msgs/c/qpb.pb-c.h
+../../../../../quagga/qpb/qpb.pb-c.h

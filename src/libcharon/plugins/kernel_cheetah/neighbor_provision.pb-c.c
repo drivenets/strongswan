@@ -1,1 +1,1 @@
-../../../../../../../src/jag_msgs/c/neighbor_provision.pb-c.c
+../../../../../quagga/qpb/neighbor_provision.pb-c.c

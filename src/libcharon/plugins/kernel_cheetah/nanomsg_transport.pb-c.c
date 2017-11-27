@@ -1,1 +1,1 @@
-../../../../../../../src/jag_msgs/c/nanomsg_transport.pb-c.c
+../../../../../quagga/qpb/nanomsg_transport.pb-c.c

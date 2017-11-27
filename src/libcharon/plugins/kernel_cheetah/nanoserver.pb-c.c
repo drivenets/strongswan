@@ -1,1 +1,1 @@
-../../../../../../../src/jag_msgs/c/nanoserver.pb-c.c
+../../../../../quagga/qpb/nanoserver.pb-c.c
