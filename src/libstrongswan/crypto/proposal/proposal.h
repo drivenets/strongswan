@@ -16,7 +16,7 @@
 
 /**
  * @defgroup proposal proposal
- * @{ @ingroup config
+ * @{ @ingroup crypto
  */
 
 #ifndef PROPOSAL_H_
@@ -82,7 +82,7 @@ struct proposal_t {
 						   uint16_t alg, uint16_t key_size);
 
 	/**
-	 * Get an enumerator over algorithms for a specifc algo type.
+	 * Get an enumerator over algorithms for a specific algo type.
 	 *
 	 * @param type			kind of algorithm
 	 * @return				enumerator over uint16_t alg, uint16_t key_size

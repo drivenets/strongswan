@@ -23,16 +23,16 @@
 
 ENUM_BEGIN(hash_algorithm_names, HASH_SHA1, HASH_IDENTITY,
 	"HASH_SHA1",
-	"HASH_SHA256",
-	"HASH_SHA384",
-	"HASH_SHA512",
+	"HASH_SHA2_256",
+	"HASH_SHA2_384",
+	"HASH_SHA2_512",
 	"HASH_IDENTITY");
 ENUM_NEXT(hash_algorithm_names, HASH_UNKNOWN, HASH_SHA3_512, HASH_IDENTITY,
 	"HASH_UNKNOWN",
 	"HASH_MD2",
 	"HASH_MD4",
 	"HASH_MD5",
-	"HASH_SHA224",
+	"HASH_SHA2_224",
 	"HASH_SHA3_224",
 	"HASH_SHA3_256",
 	"HASH_SHA3_384",
@@ -56,6 +56,24 @@ ENUM_NEXT(hash_algorithm_short_names, HASH_UNKNOWN, HASH_SHA3_512, HASH_IDENTITY
 	"sha3_384",
 	"sha3_512");
 ENUM_END(hash_algorithm_short_names, HASH_SHA3_512);
+
+ENUM_BEGIN(hash_algorithm_short_names_upper, HASH_SHA1, HASH_IDENTITY,
+	"SHA1",
+	"SHA2_256",
+	"SHA2_384",
+	"SHA2_512",
+	"IDENTITY");
+ENUM_NEXT(hash_algorithm_short_names_upper, HASH_UNKNOWN, HASH_SHA3_512, HASH_IDENTITY,
+	"UNKNOWN",
+	"MD2",
+	"MD4",
+	"MD5",
+	"SHA2_224",
+	"SHA3_224",
+	"SHA3_256",
+	"SHA3_384",
+	"SHA3_512");
+ENUM_END(hash_algorithm_short_names_upper, HASH_SHA3_512);
 
 /*
  * Described in header
