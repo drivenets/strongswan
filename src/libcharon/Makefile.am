@@ -553,10 +553,10 @@ endif
 endif
 
 #@@@ hagai start
-if USE_KERNEL_CHEETAH
-  SUBDIRS += plugins/kernel_cheetah
+if USE_KERNEL_LIBIPSEC_CHEETAH
+  SUBDIRS += plugins/kernel_libipsec_cheetah
 if MONOLITHIC
-  libcharon_la_LIBADD += plugins/kernel_cheetah/libstrongswan-kernel-cheetah.la
+  libcharon_la_LIBADD += plugins/kernel_libipsec_cheetah/libstrongswan-kernel-libipsec-cheetah.la
 endif
 endif
 #@@@ hagai end
