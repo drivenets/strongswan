@@ -1443,7 +1443,7 @@ ADD_PLUGIN([kernel-wfp],           [c charon])
 ADD_PLUGIN([kernel-iph],           [c charon])
 ADD_PLUGIN([kernel-pfkey],         [c charon starter nm cmd])
 #@@@ hagai start
-ADD_PLUGIN([kernel-libipsec-cheetah],       [c charon starter nm cmd])
+ADD_PLUGIN([kernel-libipsec-cheetah],       [c charon cmd])
 #@@@ hagai end
 ADD_PLUGIN([kernel-pfroute],       [c charon starter nm cmd])
 ADD_PLUGIN([kernel-netlink],       [c charon starter nm cmd])

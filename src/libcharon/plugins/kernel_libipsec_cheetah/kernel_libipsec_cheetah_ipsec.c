@@ -337,6 +337,56 @@ static void policy_entry_destroy(policy_entry_t *this)
 	free(this);
 }
 
+//@@@ hagai start
+static void ts2_l3prefix(traffic_selector_t* ts, Qpb__L3Prefix *subnet)
+{
+	host_t *net_host;
+	chunk_t net_chunk;
+	uint8_t mask;
+
+	ts->to_subnet(ts, &net_host, &mask);
+	subnet->length = mask;
+	net_chunk = net_host->get_address(net_host);
+	subnet->bytes.len = net_chunk.len;
+	subnet->bytes.data = (uint8_t*)malloc(net_chunk.len);
+	memcpy(subnet->bytes.data, net_chunk.ptr, net_chunk.len);
+	net_host->destroy(net_host);
+}
+
+static void set_proto_address(
+		host_t* host,
+		Qpb__L3Address* msg_addr,
+		Qpb__Ipv4Address* proto_addr4,
+		Qpb__Ipv6Address* proto_addr6,
+		int* family)
+{
+	switch (host->get_family(host))
+	{
+		case AF_INET:
+		{
+			struct sockaddr_in* sockaddr = (struct sockaddr_in*)(host->get_sockaddr(host));
+			msg_addr->v4 = proto_addr4;
+			msg_addr->v4->value = sockaddr->sin_addr.s_addr;
+			*family = QPB__ADDRESS_FAMILY__IPV4;
+		}
+		break;
+
+		case AF_INET6:
+		{
+			struct sockaddr_in6* sockaddr = (struct sockaddr_in6*)(host->get_sockaddr(host));
+			msg_addr->v6 = proto_addr6;
+			msg_addr->v6->bytes.len = 16;
+			msg_addr->v6->bytes.data = (uint8_t*)malloc(msg_addr->v6->bytes.len);
+			memcpy(msg_addr->v6->bytes.data,
+					sockaddr->sin6_addr.s6_addr, msg_addr->v6->bytes.len);
+			*family = QPB__ADDRESS_FAMILY__IPV6;
+		}
+		break;
+	}
+
+}
+//@@@ hagai end
+
 CALLBACK(policy_entry_equals, bool,
 	policy_entry_t *a, va_list args)
 {
@@ -385,14 +435,25 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 	private_kernel_libipsec_cheetah_ipsec_t *this, kernel_ipsec_sa_id_t *id,
 	kernel_ipsec_add_sa_t *data)
 {
-
+	/*@@@ hagai udp encapsulation hack
 	int ret = ipsec->sas->add_sa(ipsec->sas, id->src, id->dst, id->spi, id->proto,
 					data->reqid, id->mark, data->tfc, data->lifetime,
 					data->enc_alg, data->enc_key, data->int_alg, data->int_key,
 					data->mode, data->ipcomp, data->cpi, data->initiator,
 					data->encap, data->esn, data->inbound, data->update);
+	*/
+
+	DBG1(DBG_KNL, "add_sa start. spi=%x", id->spi);
+	int ret = ipsec->sas->add_sa(ipsec->sas, id->src, id->dst, id->spi, id->proto,
+					data->reqid, id->mark, data->tfc, data->lifetime,
+					data->enc_alg, data->enc_key, data->int_alg, data->int_key,
+					data->mode, data->ipcomp, data->cpi, data->initiator,
+					1, data->esn, data->inbound, data->update);
+
+	DBG1(DBG_KNL, "add_sa ret=%d", ret);
 	if (ret != SUCCESS)
 		return ret;
+
 
 	//@@@ hagai start
 	Cheetah__CheetahMessage encap = CHEETAH__CHEETAH_MESSAGE__INIT;
@@ -404,25 +465,23 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 
 	Ipsec__AddSA ipsec_add_sa_msg = IPSEC__ADD_SA__INIT;
 	Qpb__L3Address src = QPB__L3_ADDRESS__INIT;
-	Qpb__Ipv4Address src_addr = QPB__IPV4_ADDRESS__INIT;
 	Qpb__L3Prefix src_subnet = QPB__L3_PREFIX__INIT;
+	Qpb__Ipv4Address src_addr4 = QPB__IPV4_ADDRESS__INIT;
+	Qpb__Ipv6Address src_addr6 = QPB__IPV6_ADDRESS__INIT;
 
 	Qpb__L3Address dst = QPB__L3_ADDRESS__INIT;
-	Qpb__Ipv4Address dst_addr = QPB__IPV4_ADDRESS__INIT;
 	Qpb__L3Prefix dst_subnet = QPB__L3_PREFIX__INIT;
+	Qpb__Ipv4Address dst_addr4 = QPB__IPV4_ADDRESS__INIT;
+	Qpb__Ipv6Address dst_addr6 = QPB__IPV6_ADDRESS__INIT;
 
 	ipsec_msg.add_sa = &ipsec_add_sa_msg;
 
-	ipsec_add_sa_msg.spi = ntohl(id->spi);
-	struct sockaddr_in* src_sockaddr = (struct sockaddr_in*)(id->src->get_sockaddr(id->src));
+	ipsec_add_sa_msg.spi = id->spi;
 	ipsec_add_sa_msg.src = &src;
-	ipsec_add_sa_msg.src->v4 = &src_addr;
-	ipsec_add_sa_msg.src->v4->value = src_sockaddr->sin_addr.s_addr;
-
-	struct sockaddr_in* dst_sockaddr = (struct sockaddr_in*)(id->dst->get_sockaddr(id->dst));
 	ipsec_add_sa_msg.dst = &dst;
-	ipsec_add_sa_msg.dst->v4 = &dst_addr;
-	ipsec_add_sa_msg.dst->v4->value = dst_sockaddr->sin_addr.s_addr;
+
+	set_proto_address(id->src, ipsec_add_sa_msg.src, &src_addr4, &src_addr6, &ipsec_add_sa_msg.src_family);
+	set_proto_address(id->dst, ipsec_add_sa_msg.dst, &dst_addr4, &dst_addr6, &ipsec_add_sa_msg.dst_family);
 
 	traffic_selector_t *first_src_ts, *first_dst_ts;
 
@@ -490,8 +549,11 @@ METHOD(kernel_ipsec_t, del_sa, status_t,
 	private_kernel_libipsec_cheetah_ipsec_t *this, kernel_ipsec_sa_id_t *id,
 	kernel_ipsec_del_sa_t *data)
 {
+	DBG1(DBG_KNL, "del_sa start. spi=%x", id->spi);
+
 	int ret = ipsec->sas->del_sa(ipsec->sas, id->src, id->dst, id->spi, id->proto,
 							  data->cpi, id->mark);
+	DBG1(DBG_KNL, "del_sa. ret=%d", ret);
 	if (ret != SUCCESS)
 		return ret;
 

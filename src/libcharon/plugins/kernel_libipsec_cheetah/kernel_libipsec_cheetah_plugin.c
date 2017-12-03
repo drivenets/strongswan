@@ -23,12 +23,12 @@
 
 #define TUN_DEFAULT_MTU 1400
 
-typedef struct private_kernel_cheetah_libipsec_plugin_t private_kernel_cheetah_libipsec_plugin_t;
+typedef struct private_kernel_libipsec_cheetah_plugin_t private_kernel_libipsec_cheetah_plugin_t;
 
 /**
  * private data of "kernel" libipsec plugin
  */
-struct private_kernel_cheetah_libipsec_plugin_t {
+struct private_kernel_libipsec_cheetah_plugin_t {
 
 	/**
 	 * implements plugin interface
@@ -47,7 +47,7 @@ struct private_kernel_cheetah_libipsec_plugin_t {
 };
 
 METHOD(plugin_t, get_name, char*,
-	private_kernel_cheetah_libipsec_plugin_t *this)
+	private_kernel_libipsec_cheetah_plugin_t *this)
 {
 	return "kernel-libipsec-cheetah";
 }
@@ -55,7 +55,7 @@ METHOD(plugin_t, get_name, char*,
 /**
  * Create the kernel_libipsec_cheetah_router_t instance
  */
-static bool create_router(private_kernel_cheetah_libipsec_plugin_t *this,
+static bool create_router(private_kernel_libipsec_cheetah_plugin_t *this,
 						  plugin_feature_t *feature, bool reg, void *arg)
 {
 	if (reg)
@@ -70,7 +70,7 @@ static bool create_router(private_kernel_cheetah_libipsec_plugin_t *this,
 }
 
 METHOD(plugin_t, get_features, int,
-	private_kernel_cheetah_libipsec_plugin_t *this, plugin_feature_t *features[])
+	private_kernel_libipsec_cheetah_plugin_t *this, plugin_feature_t *features[])
 {
 	static plugin_feature_t f[] = {
 		PLUGIN_CALLBACK(kernel_ipsec_register, kernel_libipsec_cheetah_ipsec_create),
@@ -84,7 +84,7 @@ METHOD(plugin_t, get_features, int,
 }
 
 METHOD(plugin_t, destroy, void,
-	private_kernel_cheetah_libipsec_plugin_t *this)
+	private_kernel_libipsec_cheetah_plugin_t *this)
 {
 	if (this->tun)
 	{
@@ -98,13 +98,13 @@ METHOD(plugin_t, destroy, void,
 /*
  * see header file
  */
-plugin_t *kernel_cheetah_libipsec_plugin_create()
+plugin_t *kernel_libipsec_cheetah_plugin_create()
 {
-	private_kernel_cheetah_libipsec_plugin_t *this;
+	private_kernel_libipsec_cheetah_plugin_t *this;
 
 	if (!lib->caps->check(lib->caps, CAP_NET_ADMIN))
 	{	/* required to create TUN devices */
-		DBG1(DBG_KNL, "kernel-libipsec plugin requires CAP_NET_ADMIN "
+		DBG1(DBG_KNL, "kernel-libipsec-cheetah plugin requires CAP_NET_ADMIN "
 			 "capability");
 		return NULL;
 	}
