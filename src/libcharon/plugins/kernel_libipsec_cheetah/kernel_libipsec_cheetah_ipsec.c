@@ -12,6 +12,7 @@
  * for more details.
  */
 
+#define _GNU_SOURCE
 #include "kernel_libipsec_cheetah_ipsec.h"
 
 #include <library.h>
@@ -21,6 +22,11 @@
 #include <threading/mutex.h>
 #include <threading/condvar.h>
 #include <threading/thread.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <sched.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include <utils/debug.h>
 #include "kernel_libipsec_cheetah_router.h"
@@ -358,7 +364,7 @@ static void set_proto_address(
 		Qpb__L3Address* msg_addr,
 		Qpb__Ipv4Address* proto_addr4,
 		Qpb__Ipv6Address* proto_addr6,
-		int* family)
+		Qpb__AddressFamily* family)
 {
 	switch (host->get_family(host))
 	{
@@ -495,6 +501,7 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 	ts2_l3prefix(first_dst_ts, ipsec_add_sa_msg.dst_subnet);
 
 	ipsec_add_sa_msg.inbound = data->inbound;
+	ipsec_add_sa_msg.udp_encapsulation = data->encap;
 
 	const char *enc_alg_name = lookup_algorithm(ENCRYPTION_ALGORITHM, data->enc_alg);
 	DBG2(DBG_KNL, "  using encryption algorithm %N with key size %d",
@@ -1016,9 +1023,15 @@ static void *nano_processing_thread(void *arg)
 
 //@@@ hagai end
 
-/*
- * Described in header.
- */
+static int get_network_fd(pid_t pid)
+{
+	char buf[64];
+	sprintf(buf, "/proc/%d/ns/net", pid);
+	int fd = open(buf, O_RDONLY); /* Get file descriptor for namespace */
+
+	return fd;
+}
+
 kernel_libipsec_cheetah_ipsec_t *kernel_libipsec_cheetah_ipsec_create()
 {
 	private_kernel_libipsec_cheetah_ipsec_t *this;
@@ -1058,11 +1071,17 @@ kernel_libipsec_cheetah_ipsec_t *kernel_libipsec_cheetah_ipsec_create()
 	//@@@ hagai teardown?
 	//@@@ hagai start
 	nm_transport_init_logger((logger_callback)nano_log);
-	this->nm_socket = (struct nm_transport_socket *)malloc(sizeof(struct nm_transport_socket));
 
+	pid_t pid = getpid();
+	int original_fd = get_network_fd(pid);
+	int nano_fd = get_network_fd(1);
+
+    int ret = setns (nano_fd, CLONE_NEWNET);
+
+    this->nm_socket = (struct nm_transport_socket *)malloc(sizeof(struct nm_transport_socket));
 	this->nm_socket = nm_transport_init(this->nm_socket,
 			//,"tcp://0.0.0.0:7788"
-			"tcp://0.0.0.0:2710", //@@@ todo hagai hardcoded first, then from config
+			"tcp://Datapath1:2710", //@@@ todo hagai hardcoded first, then from config
 			"strongswan",
 			0,
 			msg_received_cb,
@@ -1077,6 +1096,8 @@ kernel_libipsec_cheetah_ipsec_t *kernel_libipsec_cheetah_ipsec_create()
 		destroy(this);
 		return NULL;
 	}
+
+	ret = setns(original_fd, CLONE_NEWNET);
 
 	this->nm_mutex = mutex_create(MUTEX_TYPE_DEFAULT);
 	this->nm_condvar = condvar_create(CONDVAR_TYPE_DEFAULT);
