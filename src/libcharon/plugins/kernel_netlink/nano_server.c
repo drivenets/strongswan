@@ -62,8 +62,6 @@ void nm_transport_change_channel_state(
 	}
 
 	prev_state = nm_sock->session_state;
-	nn_log(LOG_DEBUG, "nanoserver change state %d->%d", prev_state, new_channel_state);
-
 	nm_sock->session_state = new_channel_state;
 
 	if (prev_state != new_channel_state
@@ -165,6 +163,7 @@ struct nm_transport_socket *nm_transport_init(
 		strncpy(nm_sock->name, name, NN_SERVER_MAX_NAME_SIZE);
 	}
 	nm_sock->args = args;
+	pthread_spin_init(&nm_sock->send_lock, PTHREAD_PROCESS_PRIVATE);
 	nm_sock->is_initiated = 1;
 	return nm_sock;
 }
@@ -179,7 +178,7 @@ void nm_transport_close(
 		return;
 
 	nm_transport_change_channel_state (socket, NM_SESSION_DOWN);
-
+	pthread_spin_destroy(&socket->send_lock);
 	nn_close (socket->socket_id);
 	memset(socket, 0, sizeof (*socket));
 }
@@ -409,6 +408,8 @@ int nm_transport_send_data(
 		return NANO_MSG_SEND_FAILED;
 	}
 
+	pthread_spin_lock(&socket->send_lock);
+
 	NanoMsgEncapsulation msg_encap = NANO_MSG_ENCAPSULATION__INIT;
 	msg_encap.nano_server_choice_case = NANO_MSG_ENCAPSULATION__NANO_SERVER_CHOICE_DATA;
 	msg_encap.data.len = len;
@@ -418,10 +419,13 @@ int nm_transport_send_data(
 	msg_encap.has_session_id = 1;
 	msg_encap.has_sequence_number = 1;
 	res = send_msg(socket, &msg_encap);
-	if (res >= 0){
+
+	if (res >= 0)
+	{
 		socket->out_sequence_number += 1;
 	}
 
+	pthread_spin_unlock(&socket->send_lock);
 	return res;
 }
 

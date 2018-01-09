@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <nanomsg/nn.h>
 #include <syslog.h>
+#include <pthread.h>
 
 #define NN_SERVER_MAX_NAME_SIZE (32)
 
@@ -56,6 +57,9 @@ struct nm_transport_socket {
 	should_yield_callback check_should_yield;
 
 	void *args;
+
+	//@@@ hagai - spinlock to prevent sequence reordering
+	pthread_spinlock_t send_lock;
 }; 
 
 
