@@ -761,6 +761,8 @@ static bool install_route(private_kernel_libipsec_cheetah_ipsec_t *this,
 			return TRUE;
 		}
 		/* uninstall previously installed route */
+		//@@@ hagai
+#if 0
 		if (charon->kernel->del_route(charon->kernel, old->dst_net,
 									  old->prefixlen, old->gateway,
 									  old->src_ip, old->if_name) != SUCCESS)
@@ -769,6 +771,7 @@ static bool install_route(private_kernel_libipsec_cheetah_ipsec_t *this,
 				 "%R === %R %N", src_ts, dst_ts, policy_dir_names,
 				 policy->direction);
 		}
+#endif
 		route_entry_destroy(old);
 		policy->route = NULL;
 	}
@@ -789,6 +792,9 @@ static bool install_route(private_kernel_libipsec_cheetah_ipsec_t *this,
 		add_exclude_route(this, route, src, dst);
 	}
 
+	//@@@ hagai
+	return TRUE;
+#if 0
 	DBG2(DBG_KNL, "installing route: %R src %H dev %s",
 		 dst_ts, route->src_ip, route->if_name);
 
@@ -809,12 +815,16 @@ static bool install_route(private_kernel_libipsec_cheetah_ipsec_t *this,
 			return TRUE;
 		default:
 			DBG1(DBG_KNL, "installing route failed: %R src %H dev %s",
+
+
+
 				 dst_ts, route->src_ip, route->if_name);
 			remove_exclude_route(this, route);
 			route_entry_destroy(route);
 			this->mutex->unlock(this->mutex);
 			return FALSE;
 	}
+#endif
 }
 
 METHOD(kernel_ipsec_t, add_policy, status_t,
