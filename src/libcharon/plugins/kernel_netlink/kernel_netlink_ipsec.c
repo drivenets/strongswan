@@ -1353,6 +1353,24 @@ static void set_proto_address(
 	}
 
 }
+
+static void ts_list_to_proto(linked_list_t* ts_list, size_t* count, Qpb__L3Prefix*** proto_tss)
+{
+	*count = ts_list->get_count(ts_list);
+	*proto_tss = (Qpb__L3Prefix**)malloc(*count * sizeof(Qpb__L3Prefix*));
+
+	traffic_selector_t *cur_ts;
+	enumerator_t* ts_enum = ts_list->create_enumerator(ts_list);
+	int iSubnet = 0;
+	while (ts_enum->enumerate(ts_enum, (void**)&cur_ts))
+	{
+		*proto_tss[iSubnet] = (Qpb__L3Prefix *)malloc(sizeof(Qpb__L3Prefix));
+		qpb__l3_prefix__init(*proto_tss[iSubnet]);
+		ts2_l3prefix(cur_ts, *proto_tss[iSubnet]);
+		++iSubnet;
+	}
+}
+
 //@@@ hagai end
 
 METHOD(kernel_ipsec_t, add_sa, status_t,
@@ -1786,14 +1804,8 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 	set_proto_address(id->src, ipsec_add_sa_msg.src, &src_addr4, &src_addr6, &ipsec_add_sa_msg.src_family);
 	set_proto_address(id->dst, ipsec_add_sa_msg.dst, &dst_addr4, &dst_addr6, &ipsec_add_sa_msg.dst_family);
 
-	data->src_ts->get_first(data->src_ts, (void**)&first_src_ts);
-	data->dst_ts->get_first(data->dst_ts, (void**)&first_dst_ts);
-
-	ipsec_add_sa_msg.src_subnet = &src_subnet;
-	ts2_l3prefix(first_src_ts, ipsec_add_sa_msg.src_subnet);
-
-	ipsec_add_sa_msg.dst_subnet = &dst_subnet;
-	ts2_l3prefix(first_dst_ts, ipsec_add_sa_msg.dst_subnet);
+	ts_list_to_proto(data->src_ts, &ipsec_add_sa_msg.n_src_subnets, &ipsec_add_sa_msg.src_subnets);
+	ts_list_to_proto(data->dst_ts, &ipsec_add_sa_msg.n_dst_subnets, &ipsec_add_sa_msg.dst_subnets);
 
 	ipsec_add_sa_msg.inbound = data->inbound;
 	ipsec_add_sa_msg.udp_encapsulation = data->encap;
@@ -1825,6 +1837,8 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 	DBG1(DBG_KNL, "sending add_sa to cheetah. socket=%x, session=%lu, buf_len=%d", this->nm_socket, this->nm_socket->session_id, buf_len);
 	res = nm_transport_send_data(this->nm_socket, buf, buf_len);
 	DBG1(DBG_KNL, "sa_send result=%d, errno=%d", res, errno);
+	free(ipsec_add_sa_msg.src_subnets);
+	free(ipsec_add_sa_msg.dst_subnets);
 	free(buf);
 
 	//@@@ hagai end
