@@ -1364,9 +1364,9 @@ static void ts_list_to_proto(linked_list_t* ts_list, size_t* count, Qpb__L3Prefi
 	int iSubnet = 0;
 	while (ts_enum->enumerate(ts_enum, (void**)&cur_ts))
 	{
-		*proto_tss[iSubnet] = (Qpb__L3Prefix *)malloc(sizeof(Qpb__L3Prefix));
-		qpb__l3_prefix__init(*proto_tss[iSubnet]);
-		ts2_l3prefix(cur_ts, *proto_tss[iSubnet]);
+		(*proto_tss)[iSubnet] = (Qpb__L3Prefix *)malloc(sizeof(Qpb__L3Prefix));
+		qpb__l3_prefix__init((*proto_tss)[iSubnet]);
+		ts2_l3prefix(cur_ts, (*proto_tss)[iSubnet]);
 		++iSubnet;
 	}
 }
