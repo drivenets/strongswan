@@ -1810,6 +1810,15 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 	ipsec_add_sa_msg.inbound = data->inbound;
 	ipsec_add_sa_msg.udp_encapsulation = data->encap;
 
+	if (data->encap)
+	{
+		ipsec_add_sa_msg.has_udp_encap_src_port = 1;
+		ipsec_add_sa_msg.udp_encap_src_port = htons(id->src->get_port(id->src));
+
+		ipsec_add_sa_msg.has_udp_encap_dst_port = 1;
+		ipsec_add_sa_msg.udp_encap_dst_port = htons(id->dst->get_port(id->dst));
+	}
+
 	const char *enc_alg_name = lookup_algorithm(ENCRYPTION_ALGORITHM, data->enc_alg);
 	DBG2(DBG_KNL, "  using encryption algorithm %N with key size %d",
 		 encryption_algorithm_names, data->enc_alg,
