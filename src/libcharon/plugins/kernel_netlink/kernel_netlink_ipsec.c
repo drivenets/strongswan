@@ -2461,6 +2461,10 @@ static void install_route(private_kernel_netlink_ipsec_t *this,
 	route_entry_t *route;
 	host_t *iface;
 
+	//@@@ hagai start
+	char vtysh_buf[1024];
+	//@@@ hagai end
+
 	INIT(route,
 		.prefixlen = policy->sel.prefixlen_d,
 	);
@@ -2542,6 +2546,12 @@ static void install_route(private_kernel_netlink_ipsec_t *this,
 				policy->route = route;
 				break;
 		}
+		//@@@ hagai start
+		snprintf(vtysh_buf, "vtysh -c \"configure terminal\" -c \"ip route %R %H\"",
+				 out->dst_ts, route->gateway);
+		int ret = system(vtysh_buf);
+		DBG2(DBG_KNL, "vtysh returned %d", ret);
+		//@@@ hagai end
 	}
 	else
 	{
@@ -3041,6 +3051,13 @@ METHOD(kernel_ipsec_t, del_policy, status_t,
 				 "%R === %R %N%s", id->src_ts, id->dst_ts, policy_dir_names,
 				 id->dir, markstr);
 		}
+		//@@@ hagai start
+		char vtysh_buf[1024];
+		snprintf(vtysh_buf, sizeof(vtysh_buf), "vtysh -c \"configure terminal\" -c \"no ip route %R %H\"",
+				 id->dst_ts, route->gateway);
+		int ret = system(vtysh_buf);
+		DBG2(DBG_KNL, "vtysh returned %d", ret);
+		//@@@ hagai end
 	}
 	this->mutex->unlock(this->mutex);
 
