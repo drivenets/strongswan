@@ -2547,7 +2547,7 @@ static void install_route(private_kernel_netlink_ipsec_t *this,
 				break;
 		}
 		//@@@ hagai start
-		snprintf(vtysh_buf, "vtysh -c \"configure terminal\" -c \"ip route %R %H\"",
+		snprintf(vtysh_buf, sizeof(vtysh_buf), "vtysh -c \"configure terminal\" -c \"ip route %R %H\"",
 				 out->dst_ts, route->gateway);
 		int ret = system(vtysh_buf);
 		DBG2(DBG_KNL, "vtysh returned %d", ret);
