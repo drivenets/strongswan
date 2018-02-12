@@ -1830,10 +1830,21 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 	memcpy(ipsec_add_sa_msg.enc_key.data, data->enc_key.ptr, data->enc_key.len);
 
 	const char* auth_alg_name = lookup_algorithm(INTEGRITY_ALGORITHM, data->int_alg);
-	ipsec_add_sa_msg.auth_alg_name = strdup(auth_alg_name);
-	ipsec_add_sa_msg.auth_key.len = data->int_key.len;
-	ipsec_add_sa_msg.auth_key.data = (uint8_t *)malloc(ipsec_add_sa_msg.auth_key.len);
-	memcpy(ipsec_add_sa_msg.auth_key.data, data->int_key.ptr, ipsec_add_sa_msg.auth_key.len);
+	if (auth_alg_name != NULL)
+	{
+		ipsec_add_sa_msg.has_auth_key = 1;
+		ipsec_add_sa_msg.auth_alg_name = strdup(auth_alg_name);
+		ipsec_add_sa_msg.auth_key.len = data->int_key.len;
+		ipsec_add_sa_msg.auth_key.data = (uint8_t *)malloc(ipsec_add_sa_msg.auth_key.len);
+		memcpy(ipsec_add_sa_msg.auth_key.data, data->int_key.ptr, ipsec_add_sa_msg.auth_key.len);
+	}
+	else
+	{
+		ipsec_add_sa_msg.has_auth_key = 0;
+		ipsec_add_sa_msg.auth_alg_name = NULL;
+		ipsec_add_sa_msg.auth_key.len = 0;
+		ipsec_add_sa_msg.auth_key.data = NULL;
+	}
 
 	void						*buf;
 	unsigned					buf_len;
