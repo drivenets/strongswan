@@ -274,11 +274,15 @@ static inline uint8_t proto_ike2ip(protocol_id_t protocol)
  */
 static inline mark_t mark_in_sa(private_child_sa_t *this)
 {
+	//@@@ hagai patch - don't know how to configure this and we need both marks
+	/*
 	if (this->config->has_option(this->config, OPT_MARK_IN_SA))
 	{
 		return this->mark_in;
 	}
 	return (mark_t){};
+	*/
+	return this->mark_in;
 }
 
 METHOD(child_sa_t, get_name, char*,
