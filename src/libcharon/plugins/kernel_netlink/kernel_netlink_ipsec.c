@@ -1854,7 +1854,7 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 		ipsec_add_sa_msg.auth_key.data = NULL;
 	}
 
-	ipsec_add_sa_msg.tunnel_id = id->mark.value;
+	//@@@ hagai patch ipsec_add_sa_msg.tunnel_id = id->mark.value;
 	if (data->vrf_id != NULL)
 	{
 		ipsec_add_sa_msg.vrf_name = strdup(data->vrf_id);
