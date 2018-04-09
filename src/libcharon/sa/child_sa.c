@@ -648,6 +648,7 @@ static bool update_usetime(private_child_sa_t *this, bool inbound)
 				.dst_ts = other_ts,
 				.mark = this->mark_out,
 				.interface = this->config->get_interface(this->config),
+				.vrf_id = this->config->get_vrf_id(this->config)
 			};
 			kernel_ipsec_query_policy_t query = {};
 
@@ -887,6 +888,7 @@ static status_t install_internal(private_child_sa_t *this, chunk_t encr,
 		.enc_key = encr,
 		.int_alg = int_alg,
 		.int_key = integ,
+		.vrf_id = this->config->get_vrf_id(this->config),
 		.replay_window = this->config->get_replay_window(this->config),
 		.tfc = tfc,
 		.ipcomp = this->ipcomp,
@@ -1020,6 +1022,7 @@ static status_t install_policies_outbound(private_child_sa_t *this,
 		.dst_ts = other_ts,
 		.mark = this->mark_out,
 		.interface = this->config->get_interface(this->config),
+		.vrf_id = this->config->get_vrf_id(this->config)
 	};
 	kernel_ipsec_manage_policy_t out_policy = {
 		.type = type,
@@ -1126,6 +1129,7 @@ static void del_policies_outbound(private_child_sa_t *this,
 		.dst_ts = other_ts,
 		.mark = this->mark_out,
 		.interface = this->config->get_interface(this->config),
+		.vrf_id = this->config->get_vrf_id(this->config)
 	};
 	kernel_ipsec_manage_policy_t out_policy = {
 		.type = type,

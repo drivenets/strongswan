@@ -484,6 +484,7 @@ typedef struct {
 	linked_list_t *local_ts;
 	linked_list_t *remote_ts;
 	uint32_t replay_window;
+	char* vrf_id;
 	bool policies;
 	child_cfg_create_t cfg;
 } child_data_t;
@@ -517,6 +518,11 @@ static void log_child_data(child_data_t *data, char *name)
 	{
 		DBG2(DBG_CFG, "   replay_window = %u", data->replay_window);
 	}
+	if (data->vrf_id != NULL)
+	{
+		DBG2(DBG_CFG, "   vrf_id = %s", data->vrf_id);
+	}
+
 	DBG2(DBG_CFG, "   dpd_action = %N", action_names, cfg->dpd_action);
 	DBG2(DBG_CFG, "   start_action = %N", action_names, cfg->start_action);
 	DBG2(DBG_CFG, "   close_action = %N", action_names, cfg->close_action);
@@ -1557,6 +1563,7 @@ CALLBACK(child_kv, bool,
 		{ "policies",			parse_bool,			&child->policies					},
 		{ "policies_fwd_out",	parse_opt_fwd_out,	&child->cfg.options					},
 		{ "replay_window",		parse_uint32,		&child->replay_window				},
+		{ "vrf_id",				parse_string,		&child->cfg.vrf_id					},
 		{ "rekey_time",			parse_time,			&child->cfg.lifetime.time.rekey		},
 		{ "life_time",			parse_time,			&child->cfg.lifetime.time.life		},
 		{ "rand_time",			parse_time,			&child->cfg.lifetime.time.jitter	},
@@ -1791,6 +1798,7 @@ CALLBACK(children_sn, bool,
 		.remote_ts = linked_list_create(),
 		.policies = TRUE,
 		.replay_window = REPLAY_UNDEFINED,
+		.vrf_id = NULL,
 		.cfg = {
 			.mode = MODE_TUNNEL,
 			.lifetime = {

@@ -142,6 +142,11 @@ struct private_child_cfg_t {
 	 * anti-replay window size
 	 */
 	uint32_t replay_window;
+
+	/**
+	 * anti-replay window size
+	 */
+	char* vrf_id;
 };
 
 METHOD(child_cfg_t, get_name, char*,
@@ -540,6 +545,12 @@ METHOD(child_cfg_t, get_replay_window, uint32_t,
 	return this->replay_window;
 }
 
+METHOD(child_cfg_t, get_vrf_id, char*,
+	private_child_cfg_t *this)
+{
+	return this->vrf_id;
+}
+
 METHOD(child_cfg_t, set_replay_window, void,
 	private_child_cfg_t *this, uint32_t replay_window)
 {
@@ -593,7 +604,8 @@ METHOD(child_cfg_t, equals, bool,
 		this->manual_prio == other->manual_prio &&
 		this->replay_window == other->replay_window &&
 		streq(this->updown, other->updown) &&
-		streq(this->interface, other->interface);
+		streq(this->interface, other->interface) &&
+		streq(this->vrf_id, other->vrf_id);
 }
 
 METHOD(child_cfg_t, get_ref, child_cfg_t*,
@@ -647,6 +659,7 @@ child_cfg_t *child_cfg_create(char *name, child_cfg_create_t *data)
 			.get_manual_prio = _get_manual_prio,
 			.get_interface = _get_interface,
 			.get_replay_window = _get_replay_window,
+			.get_vrf_id = _get_vrf_id,
 			.set_replay_window = _set_replay_window,
 			.has_option = _has_option,
 			.equals = _equals,
@@ -674,6 +687,7 @@ child_cfg_t *child_cfg_create(char *name, child_cfg_create_t *data)
 		.other_ts = linked_list_create(),
 		.replay_window = lib->settings->get_int(lib->settings,
 							"%s.replay_window", DEFAULT_REPLAY_WINDOW, lib->ns),
+		.vrf_id = strdupnull(data->vrf_id),
 	);
 
 	return &this->public;

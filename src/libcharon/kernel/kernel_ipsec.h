@@ -83,6 +83,8 @@ struct kernel_ipsec_add_sa_t {
 	chunk_t int_key;
 	/** Anti-replay window size */
 	uint32_t replay_window;
+	/** vrf id */
+	char *vrf_id;
 	/** Traffic Flow Confidentiality padding */
 	uint32_t tfc;
 	/** IPComp transform */
@@ -148,6 +150,8 @@ struct kernel_ipsec_policy_id_t {
 	mark_t mark;
 	/** Network interface restricting policy */
 	char *interface;
+	// vrf
+	char* vrf_id;
 };
 
 /**

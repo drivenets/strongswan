@@ -201,6 +201,7 @@ static void stroke_add_conn(private_stroke_socket_t *this, stroke_msg_t *msg)
 	pop_string(msg, &msg->add_conn.eap_identity);
 	pop_string(msg, &msg->add_conn.aaa_identity);
 	pop_string(msg, &msg->add_conn.xauth_identity);
+	pop_string(msg, &msg->add_conn.vrf_id);
 	pop_string(msg, &msg->add_conn.algorithms.ike);
 	pop_string(msg, &msg->add_conn.algorithms.esp);
 	pop_string(msg, &msg->add_conn.algorithms.ah);

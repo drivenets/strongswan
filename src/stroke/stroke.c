@@ -161,6 +161,7 @@ static int add_connection(char *name,
 	msg->add_conn.mobike = 1;
 	msg->add_conn.dpd.action = 1;
 	msg->add_conn.install_policy = 1;
+	msg->add_conn.vrf_id = NULL;
 
 	push_string(&msg, add_conn.me.id, my_id);
 	push_string(&msg, add_conn.me.address, my_addr);

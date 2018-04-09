@@ -390,7 +390,8 @@ struct route_entry_t {
 static void route_entry_destroy(route_entry_t *this)
 {
 	free(this->if_name);
-	this->src_ip->destroy(this->src_ip);
+	if (this->src_ip != NULL)
+		this->src_ip->destroy(this->src_ip);
 	DESTROY_IF(this->gateway);
 	chunk_free(&this->dst_net);
 	free(this);
@@ -530,6 +531,8 @@ struct policy_sa_out_t {
 
 	/** Destination traffic selector of this policy */
 	traffic_selector_t *dst_ts;
+
+	char* vrf_id;
 };
 
 /**
@@ -538,6 +541,7 @@ struct policy_sa_out_t {
 static policy_sa_t *policy_sa_create(private_kernel_netlink_ipsec_t *this,
 	policy_dir_t dir, policy_type_t type, host_t *src, host_t *dst,
 	traffic_selector_t *src_ts, traffic_selector_t *dst_ts, mark_t mark,
+	const char* vrf_id,
 	ipsec_sa_cfg_t *cfg)
 {
 	policy_sa_t *policy;
@@ -547,8 +551,10 @@ static policy_sa_t *policy_sa_create(private_kernel_netlink_ipsec_t *this,
 		policy_sa_out_t *out;
 		INIT(out,
 			.src_ts = src_ts->clone(src_ts),
-			.dst_ts = dst_ts->clone(dst_ts),
+			.dst_ts = dst_ts->clone(dst_ts)
 		);
+		if (vrf_id != NULL)
+			out->vrf_id = strdup(vrf_id);
 		policy = &out->generic;
 	}
 	else
@@ -571,6 +577,8 @@ static void policy_sa_destroy(policy_sa_t *policy, policy_dir_t dir,
 		policy_sa_out_t *out = (policy_sa_out_t*)policy;
 		out->src_ts->destroy(out->src_ts);
 		out->dst_ts->destroy(out->dst_ts);
+		if (out->vrf_id != NULL)
+			free(out->vrf_id);
 	}
 	ipsec_sa_destroy(this, policy->sa);
 	free(policy);
@@ -1305,7 +1313,7 @@ static bool add_mark(struct nlmsghdr *hdr, int buflen, mark_t mark)
 	}
 	return TRUE;
 }
-//@@@ hagai start
+
 static void ts2_l3prefix(traffic_selector_t* ts, Qpb__L3Prefix *subnet)
 {
 	host_t *net_host;
@@ -1847,6 +1855,10 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 	}
 
 	ipsec_add_sa_msg.tunnel_id = id->mark.value;
+	if (data->vrf_id != NULL)
+	{
+		ipsec_add_sa_msg.vrf_name = strdup(data->vrf_id);
+	}
 
 	void						*buf;
 	unsigned					buf_len;
@@ -1856,13 +1868,19 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 	buf = malloc(buf_len);
 	cheetah__cheetah_message__pack(&encap, buf);
 
-	DBG1(DBG_KNL, "sending add_sa to cheetah. socket=%x, session=%lu, buf_len=%d", this->nm_socket, this->nm_socket->session_id, buf_len);
+	DBG1(DBG_KNL, "sending msg to cheetah. socket=%x, session=%lu, buf_len=%d", this->nm_socket, this->nm_socket->session_id, buf_len);
 	res = nm_transport_send_data(this->nm_socket, buf, buf_len);
 	DBG1(DBG_KNL, "sa_send result=%d, errno=%d", res, errno);
-	free(ipsec_add_sa_msg.src_subnets);
-	free(ipsec_add_sa_msg.dst_subnets);
 	free(buf);
 
+	free(ipsec_add_sa_msg.src_subnets);
+	free(ipsec_add_sa_msg.dst_subnets);
+	if (ipsec_add_sa_msg.auth_alg_name != NULL)
+		free(ipsec_add_sa_msg.auth_alg_name);
+	if (ipsec_add_sa_msg.enc_alg_name != NULL)
+		free(ipsec_add_sa_msg.enc_alg_name);
+	if (ipsec_add_sa_msg.vrf_name != NULL)
+		free(ipsec_add_sa_msg.vrf_name);
 	//@@@ hagai end
 	status = SUCCESS;
 
@@ -2114,12 +2132,10 @@ METHOD(kernel_ipsec_t, del_sa, status_t,
 	buf = malloc(buf_len);
 	cheetah__cheetah_message__pack(&encap, buf);
 
-	DBG1(DBG_KNL, "sending delete_sa to cheetah. socket=%x, session=%lu, buf_len=%d", this->nm_socket, this->nm_socket->session_id, buf_len);
+	DBG1(DBG_KNL, "sending msg to cheetah. socket=%x, session=%lu, buf_len=%d", this->nm_socket, this->nm_socket->session_id, buf_len);
 	res = nm_transport_send_data(this->nm_socket, buf, buf_len);
 	DBG1(DBG_KNL, "sa_send result=%d, errno=%d", res, errno);
 	free(buf);
-
-	//@@@ hagai end
 
 	memset(&request, 0, sizeof(request));
 	format_mark(markstr, sizeof(markstr), id->mark);
@@ -2464,6 +2480,111 @@ static void policy_change_done(private_kernel_netlink_ipsec_t *this,
 	this->mutex->unlock(this->mutex);
 }
 
+static void install_route(private_kernel_netlink_ipsec_t *this,
+	policy_entry_t *policy, policy_sa_t *mapping, ipsec_sa_t *ipsec)
+{
+	policy_sa_out_t *out = (policy_sa_out_t*)mapping;
+	route_entry_t *route;
+	INIT(route,
+		.prefixlen = policy->sel.prefixlen_d,
+		.gateway = ipsec->dst->clone(ipsec->dst)
+	);
+
+	route->dst_net = chunk_alloc(policy->sel.family == AF_INET ? 4 : 16);
+	memcpy(route->dst_net.ptr, &policy->sel.daddr, route->dst_net.len);
+
+	route_entry_t *old = policy->route;
+	if (old != NULL && route_entry_equals(old, route))
+	{
+		route_entry_destroy(route);
+		return;
+	}
+
+	policy->route = route;
+
+	//@@@ hagai start
+	Cheetah__CheetahMessage encap = CHEETAH__CHEETAH_MESSAGE__INIT;
+	Ipsec__Message ipsec_msg = IPSEC__MESSAGE__INIT;
+
+	encap.ipsec = &ipsec_msg;
+	encap.message_case = CHEETAH__CHEETAH_MESSAGE__MESSAGE_IPSEC;
+	ipsec_msg.type = IPSEC__MESSAGE__TYPE__ADD_TUNNEL_ROUTE;
+
+	Ipsec__AddTunnelRoute add_tunnel_route_msg = IPSEC__ADD_TUNNEL_ROUTE__INIT;
+	Qpb__L3Address dst = QPB__L3_ADDRESS__INIT;
+	Qpb__L3Prefix dst_subnet = QPB__L3_PREFIX__INIT;
+	Qpb__Ipv4Address dst_addr4 = QPB__IPV4_ADDRESS__INIT;
+	Qpb__Ipv6Address dst_addr6 = QPB__IPV6_ADDRESS__INIT;
+
+	ipsec_msg.add_tunnel_route = &add_tunnel_route_msg;
+	add_tunnel_route_msg.dst_address = &dst;
+	add_tunnel_route_msg.dst_subnet = &dst_subnet;
+
+	set_proto_address(ipsec->dst, add_tunnel_route_msg.dst_address, &dst_addr4, &dst_addr6, &add_tunnel_route_msg.address_family);
+	ts2_l3prefix(out->dst_ts, add_tunnel_route_msg.dst_subnet);
+
+	if (out->vrf_id != NULL)
+	{
+		add_tunnel_route_msg.vrf_name = strdup(out->vrf_id);
+	}
+
+	void						*buf;
+	unsigned					buf_len;
+	int							res;
+
+	buf_len = cheetah__cheetah_message__get_packed_size(&encap);
+	buf = malloc(buf_len);
+	cheetah__cheetah_message__pack(&encap, buf);
+
+	DBG1(DBG_KNL, "sending msg to cheetah. socket=%x, session=%lu, buf_len=%d", this->nm_socket, this->nm_socket->session_id, buf_len);
+	res = nm_transport_send_data(this->nm_socket, buf, buf_len);
+	if (add_tunnel_route_msg.vrf_name != NULL)
+		free(add_tunnel_route_msg.vrf_name);
+	DBG1(DBG_KNL, "sa_send result=%d, errno=%d", res, errno);
+	free(buf);
+}
+
+static void uninstall_route(private_kernel_netlink_ipsec_t *this, traffic_selector_t* dst_ts, host_t* gateway, const char* vrf_id)
+{
+	//@@@ hagai start
+	Cheetah__CheetahMessage encap = CHEETAH__CHEETAH_MESSAGE__INIT;
+	Ipsec__Message ipsec_msg = IPSEC__MESSAGE__INIT;
+
+	encap.ipsec = &ipsec_msg;
+	encap.message_case = CHEETAH__CHEETAH_MESSAGE__MESSAGE_IPSEC;
+	ipsec_msg.type = IPSEC__MESSAGE__TYPE__DELETE_TUNNEL_ROUTE;
+
+	Ipsec__DeleteTunnelRoute delete_tunnel_route_msg = IPSEC__DELETE_TUNNEL_ROUTE__INIT;
+	ipsec_msg.delete_tunnel_route = &delete_tunnel_route_msg;
+	Qpb__L3Prefix dst_subnet = QPB__L3_PREFIX__INIT;
+
+	delete_tunnel_route_msg.dst_subnet = &dst_subnet;
+	ts2_l3prefix(dst_ts, delete_tunnel_route_msg.dst_subnet);
+
+	if (vrf_id != NULL)
+	{
+		delete_tunnel_route_msg.vrf_name = strdup(vrf_id);
+	}
+
+	void						*buf;
+	unsigned					buf_len;
+	int							res;
+
+	buf_len = cheetah__cheetah_message__get_packed_size(&encap);
+	buf = malloc(buf_len);
+	cheetah__cheetah_message__pack(&encap, buf);
+
+	DBG1(DBG_KNL, "sending msg to cheetah. socket=%x, session=%lu, buf_len=%d", this->nm_socket, this->nm_socket->session_id, buf_len);
+	res = nm_transport_send_data(this->nm_socket, buf, buf_len);
+	if (delete_tunnel_route_msg.vrf_name != NULL)
+		free(delete_tunnel_route_msg.vrf_name);
+	DBG1(DBG_KNL, "sa_send result=%d, errno=%d", res, errno);
+	free(buf);
+}
+
+
+#if 0
+//@@@ hagai - skip installing routes
 /**
  * Install a route for the given policy if enabled and required
  */
@@ -2482,95 +2603,106 @@ static void install_route(private_kernel_netlink_ipsec_t *this,
 		.prefixlen = policy->sel.prefixlen_d,
 	);
 
+	/*@@@
 	if (charon->kernel->get_address_by_ts(charon->kernel, out->src_ts,
 										  &route->src_ip, NULL) == SUCCESS)
 	{
-		if (!ipsec->dst->is_anyaddr(ipsec->dst))
-		{
-			route->gateway = charon->kernel->get_nexthop(charon->kernel,
-												ipsec->dst, -1, ipsec->src,
-												&route->if_name);
-		}
-		else
-		{	/* for shunt policies */
-			iface = xfrm2host(policy->sel.family, &policy->sel.daddr, 0);
-			route->gateway = charon->kernel->get_nexthop(charon->kernel,
-												iface, policy->sel.prefixlen_d,
-												route->src_ip, &route->if_name);
-			iface->destroy(iface);
-		}
-		route->dst_net = chunk_alloc(policy->sel.family == AF_INET ? 4 : 16);
-		memcpy(route->dst_net.ptr, &policy->sel.daddr, route->dst_net.len);
+	*/
+	if (!ipsec->dst->is_anyaddr(ipsec->dst))
+	{
+		route->gateway = charon->kernel->get_nexthop(charon->kernel,
+											ipsec->dst, -1, ipsec->src,
+											&route->if_name);
+	}
+	else
+	{	/* for shunt policies */
+		iface = xfrm2host(policy->sel.family, &policy->sel.daddr, 0);
+		route->gateway = charon->kernel->get_nexthop(charon->kernel,
+											iface, policy->sel.prefixlen_d,
+											route->src_ip, &route->if_name);
+		iface->destroy(iface);
+	}
+	route->dst_net = chunk_alloc(policy->sel.family == AF_INET ? 4 : 16);
+	memcpy(route->dst_net.ptr, &policy->sel.daddr, route->dst_net.len);
 
-		/* get the interface to install the route for, if we haven't one yet.
-		 * If we have a local address, use it. Otherwise (for shunt policies)
-		 * use the route's source address. */
-		if (!route->if_name)
+	/* get the interface to install the route for, if we haven't one yet.
+	 * If we have a local address, use it. Otherwise (for shunt policies)
+	 * use the route's source address. */
+	if (!route->if_name)
+	{
+		iface = ipsec->src;
+		if (iface->is_anyaddr(iface))
 		{
-			iface = ipsec->src;
-			if (iface->is_anyaddr(iface))
-			{
-				iface = route->src_ip;
-			}
-			if (!charon->kernel->get_interface(charon->kernel, iface,
-											   &route->if_name))
-			{
-				route_entry_destroy(route);
-				return;
-			}
+			iface = route->src_ip;
 		}
-		if (policy->route)
+		if (!charon->kernel->get_interface(charon->kernel, iface,
+										   &route->if_name))
 		{
-			route_entry_t *old = policy->route;
-			if (route_entry_equals(old, route))
-			{
-				route_entry_destroy(route);
-				return;
-			}
-			/* uninstall previously installed route */
-			if (charon->kernel->del_route(charon->kernel, old->dst_net,
-										  old->prefixlen, old->gateway,
-										  old->src_ip, old->if_name) != SUCCESS)
-			{
-				DBG1(DBG_KNL, "error uninstalling route installed with policy "
-					 "%R === %R %N", out->src_ts, out->dst_ts, policy_dir_names,
-					 policy->direction);
-			}
-			route_entry_destroy(old);
-			policy->route = NULL;
+			route_entry_destroy(route);
+			return;
 		}
+	}
+	if (policy->route)
+	{
+		route_entry_t *old = policy->route;
+		if (route_entry_equals(old, route))
+		{
+			route_entry_destroy(route);
+			return;
+		}
+		/* uninstall previously installed route */
+		if (charon->kernel->del_route(charon->kernel, old->dst_net,
+									  old->prefixlen, old->gateway,
+									  old->src_ip, old->if_name) != SUCCESS)
+		{
+			DBG1(DBG_KNL, "error uninstalling route installed with policy "
+				 "%R === %R %N", out->src_ts, out->dst_ts, policy_dir_names,
+				 policy->direction);
+		}
+		route_entry_destroy(old);
+		policy->route = NULL;
+	}
 
-		DBG2(DBG_KNL, "installing route: %R via %H src %H dev %s", out->dst_ts,
-			 route->gateway, route->src_ip, route->if_name);
-		switch (charon->kernel->add_route(charon->kernel, route->dst_net,
-										  route->prefixlen, route->gateway,
-										  route->src_ip, route->if_name))
-		{
-			default:
-				DBG1(DBG_KNL, "unable to install source route for %H",
-					 route->src_ip);
-				/* FALL */
-			case ALREADY_DONE:
-				/* route exists, do not uninstall */
-				route_entry_destroy(route);
-				break;
-			case SUCCESS:
-				/* cache the installed route */
-				policy->route = route;
-				break;
-		}
-		//@@@ hagai start
-		snprintf(vtysh_buf, sizeof(vtysh_buf), "vtysh -c \"configure terminal\" -c \"ip route %R %H\"",
-				 out->dst_ts, route->gateway);
-		int ret = system(vtysh_buf);
-		DBG2(DBG_KNL, "vtysh returned %d", ret);
-		//@@@ hagai end
+	DBG2(DBG_KNL, "installing route: %R via %H src %H dev %s", out->dst_ts,
+		 route->gateway, route->src_ip, route->if_name);
+	switch (charon->kernel->add_route(charon->kernel, route->dst_net,
+									  route->prefixlen, route->gateway,
+									  route->src_ip, route->if_name))
+	{
+		default:
+			DBG1(DBG_KNL, "unable to install source route for %H",
+				 route->src_ip);
+			/* FALL */
+		case ALREADY_DONE:
+			/* route exists, do not uninstall */
+			route_entry_destroy(route);
+			break;
+		case SUCCESS:
+			/* cache the installed route */
+			policy->route = route;
+			break;
+	}
+	/*
 	}
 	else
 	{
 		free(route);
 	}
+	*/
+	//@@@ hagai start
+	const char vrf_cmd[128] = "";
+	if (out->vrf_id != NULL)
+		snprintf(vrf_cmd, sizeof(vrf_cmd), " vrf %s", out->vrf_id);
+
+	snprintf(vtysh_buf, sizeof(vtysh_buf), "vtysh -c \"configure terminal\" -c \"ip route %R %H%s\"",
+			 out->dst_ts, route->gateway, vrf_cmd);
+	DBG2(DBG_KNL, "running vtysh command:\n%s", vtysh_buf);
+	int ret = system(vtysh_buf);
+	DBG2(DBG_KNL, "vtysh returned %d", ret);
+	//@@@ hagai end
+
 }
+#endif
 
 /**
  * Add or update a policy in the kernel.
@@ -2781,7 +2913,7 @@ METHOD(kernel_ipsec_t, add_policy, status_t,
 
 	/* cache the assigned IPsec SA */
 	assigned_sa = policy_sa_create(this, id->dir, data->type, data->src,
-						data->dst, id->src_ts, id->dst_ts, id->mark, data->sa);
+						data->dst, id->src_ts, id->dst_ts, id->mark, id->vrf_id, data->sa);
 	assigned_sa->auto_priority = get_priority(policy, data->prio, id->interface);
 	assigned_sa->priority = this->get_priority ? this->get_priority(id, data)
 											   : data->manual_prio;
@@ -3056,6 +3188,8 @@ METHOD(kernel_ipsec_t, del_policy, status_t,
 	if (current->route)
 	{
 		route_entry_t *route = current->route;
+		//@@@ hagai start
+		/*
 		if (charon->kernel->del_route(charon->kernel, route->dst_net,
 									  route->prefixlen, route->gateway,
 									  route->src_ip, route->if_name) != SUCCESS)
@@ -3064,13 +3198,9 @@ METHOD(kernel_ipsec_t, del_policy, status_t,
 				 "%R === %R %N%s", id->src_ts, id->dst_ts, policy_dir_names,
 				 id->dir, markstr);
 		}
-		//@@@ hagai start
-		char vtysh_buf[1024];
-		snprintf(vtysh_buf, sizeof(vtysh_buf), "vtysh -c \"configure terminal\" -c \"no ip route %R %H\"",
-				 id->dst_ts, route->gateway);
-		int ret = system(vtysh_buf);
-		DBG2(DBG_KNL, "vtysh returned %d", ret);
-		//@@@ hagai end
+		*/
+		uninstall_route(this, id->dst_ts, route->gateway, id->vrf_id);
+
 	}
 	this->mutex->unlock(this->mutex);
 

@@ -210,6 +210,7 @@ static void conn_defaults(starter_conn_t *conn)
 	conn->sa_rekey_fuzz         = SA_REPLACEMENT_FUZZ_DEFAULT;
 	conn->sa_keying_tries       = SA_REPLACEMENT_RETRIES_DEFAULT;
 	conn->install_policy        = TRUE;
+	conn->vrf_id				= NULL;
 	conn->dpd_delay             =  30; /* seconds */
 	conn->dpd_timeout           = 150; /* seconds */
 	conn->replay_window         = SA_REPLAY_WINDOW_DEFAULT;

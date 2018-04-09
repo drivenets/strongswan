@@ -295,7 +295,7 @@ static route_entry_t *route_entry_clone(route_entry_t *this)
 
 	INIT(route,
 		.if_name = strdup(this->if_name),
-		.src_ip = this->src_ip->clone(this->src_ip),
+		.src_ip = this->src_ip != NULL ? this->src_ip->clone(this->src_ip) : NULL,
 		.gateway = this->gateway ? this->gateway->clone(this->gateway) : NULL,
 		.dst_net = chunk_clone(this->dst_net),
 		.prefixlen = this->prefixlen,
@@ -2602,7 +2602,8 @@ static status_t manage_srcroute(private_kernel_netlink_net_t *this,
 	hdr->nlmsg_len = NLMSG_LENGTH(sizeof(struct rtmsg));
 
 	msg = NLMSG_DATA(hdr);
-	msg->rtm_family = src_ip->get_family(src_ip);
+	//@@@ hagai no src sometimes... msg->rtm_family = src_ip->get_family(src_ip);
+	msg->rtm_family = gateway->get_family(gateway);
 	msg->rtm_dst_len = prefixlen;
 	msg->rtm_table = this->routing_table;
 	msg->rtm_protocol = RTPROT_STATIC;
@@ -2610,13 +2611,18 @@ static status_t manage_srcroute(private_kernel_netlink_net_t *this,
 	msg->rtm_scope = RT_SCOPE_UNIVERSE;
 
 	netlink_add_attribute(hdr, RTA_DST, dst_net, sizeof(request));
-	chunk = src_ip->get_address(src_ip);
-	netlink_add_attribute(hdr, RTA_PREFSRC, chunk, sizeof(request));
-	if (gateway && gateway->get_family(gateway) == src_ip->get_family(src_ip))
+	if (src_ip != NULL)
+	{
+		chunk = src_ip->get_address(src_ip);
+		netlink_add_attribute(hdr, RTA_PREFSRC, chunk, sizeof(request));
+	}
+
+	if (gateway && (src_ip == NULL || gateway->get_family(gateway) == src_ip->get_family(src_ip)))
 	{
 		chunk = gateway->get_address(gateway);
 		netlink_add_attribute(hdr, RTA_GATEWAY, chunk, sizeof(request));
 	}
+
 	ifindex = get_interface_index(this, if_name);
 	chunk.ptr = (char*)&ifindex;
 	chunk.len = sizeof(ifindex);

@@ -149,6 +149,7 @@ static bool install_shunt_policy(child_cfg_t *child)
 				.dst_ts = other_ts,
 				.mark = child->get_mark(child, FALSE),
 				.interface = interface,
+				.vrf_id = child->get_vrf_id(child)
 			};
 			kernel_ipsec_manage_policy_t policy = {
 				.type = policy_type,
@@ -319,6 +320,7 @@ static void uninstall_shunt_policy(child_cfg_t *child)
 				.dst_ts = other_ts,
 				.mark = child->get_mark(child, FALSE),
 				.interface = interface,
+				.vrf_id = child->get_vrf_id(child)
 			};
 			kernel_ipsec_manage_policy_t policy = {
 				.type = policy_type,

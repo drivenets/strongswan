@@ -209,6 +209,7 @@ int starter_stroke_add_conn(starter_config_t *cfg, starter_conn_t *conn)
 	msg->add_conn.ikedscp = conn->ikedscp;
 	msg->add_conn.ipcomp = conn->options & SA_OPTION_COMPRESS;
 	msg->add_conn.install_policy = conn->install_policy;
+	push_string(&msg, add_conn.vrf_id, conn->vrf_id);
 	msg->add_conn.aggressive = conn->aggressive;
 	msg->add_conn.pushmode = conn->options & SA_OPTION_MODECFG_PUSH;
 	msg->add_conn.crl_policy = (crl_policy_t)cfg->setup.strictcrlpolicy;

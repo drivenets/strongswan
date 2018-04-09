@@ -1,4 +1,4 @@
-\#
+#
 # Copyright (C) 2007-2017 Tobias Brunner
 # Copyright (C) 2006-2017 Andreas Steffen
 # Copyright (C) 2006-2014 Martin Willi

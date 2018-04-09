@@ -146,6 +146,7 @@ struct starter_conn {
 		uint32_t       replay_window;
 		uint32_t       tfc;
 		bool            install_policy;
+		char 			*vrf_id;
 		bool            aggressive;
 		starter_end_t   left, right;
 

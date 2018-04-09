@@ -139,6 +139,7 @@ static const token_info_t token_info[] =
 	{ ARG_MISC, 0, NULL  /* KW_TYPE */                                             },
 	{ ARG_MISC, 0, NULL  /* KW_COMPRESS */                                         },
 	{ ARG_ENUM, offsetof(starter_conn_t, install_policy), LST_bool                 },
+	{ ARG_STR,  offsetof(starter_conn_t, vrf_id), NULL                             },
 	{ ARG_ENUM, offsetof(starter_conn_t, aggressive), LST_bool                     },
 	{ ARG_STR,  offsetof(starter_conn_t, authby), LST_authby                       },
 	{ ARG_STR,  offsetof(starter_conn_t, eap_identity), NULL                       },

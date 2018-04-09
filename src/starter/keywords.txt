@@ -34,6 +34,7 @@ keyexchange,       KW_KEYEXCHANGE
 type,              KW_TYPE
 compress,          KW_COMPRESS
 installpolicy,     KW_INSTALLPOLICY
+vrf_id,			   KW_VRF_ID
 aggressive,        KW_AGGRESSIVE
 authby,            KW_AUTHBY
 eap_identity,      KW_EAP_IDENTITY

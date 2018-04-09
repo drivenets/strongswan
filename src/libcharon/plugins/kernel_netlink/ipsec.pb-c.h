@@ -1,1 +1,1 @@
-../../../../../../../src/jag_msgs/c/ipsec.pb-c.h
+../../../../../quagga/qpb/ipsec.pb-c.h

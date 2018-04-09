@@ -254,6 +254,13 @@ struct child_cfg_t {
 	void (*set_replay_window)(child_cfg_t *this, uint32_t window);
 
 	/**
+	 * Get vrf id
+	 *
+	 * @return				vrf id)
+	 */
+	char* (*get_vrf_id)(child_cfg_t *this);
+
+	/**
 	 * Check if an option flag is set.
 	 *
 	 * @param option		option flag to check
@@ -327,6 +334,8 @@ struct child_cfg_create_t {
 	mark_t mark_in;
 	/** Optional outbound mark */
 	mark_t mark_out;
+	/** vrf id**/
+	char* vrf_id;
 	/** Mode to propose for CHILD_SA */
 	ipsec_mode_t mode;
 	/** TFC padding size, 0 to disable, -1 to pad to PMTU */
